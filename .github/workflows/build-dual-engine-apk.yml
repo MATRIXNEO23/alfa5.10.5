@@ -49,8 +49,16 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install --pre --no-deps +            -f https://mlc.ai/wheels +            "mlc-llm-cpu==0.20.0.dev0" +            "mlc-ai-cpu==0.20.0"
-          python -m pip install +            "apache-tvm-ffi==0.1.11" +            "numpy==1.26.4" +            "ml_dtypes==0.5.4" +            cloudpickle packaging psutil scipy tornado typing_extensions +            requests safetensors sentencepiece shortuuid tiktoken tqdm
+          python -m pip install --pre --no-deps \
+            -f https://mlc.ai/wheels \
+            "mlc-llm-cpu==0.20.0.dev0" \
+            "mlc-ai-cpu==0.20.0"
+          python -m pip install \
+            "apache-tvm-ffi==0.1.11" \
+            "numpy==1.26.4" \
+            "ml_dtypes==0.5.4" \
+            cloudpickle packaging psutil scipy tornado typing_extensions \
+            requests safetensors sentencepiece shortuuid tiktoken tqdm
           FFI_LIB="$(python -c 'import site; print(site.getsitepackages()[0] + "/tvm_ffi/lib")')"
           echo "LD_LIBRARY_PATH=$FFI_LIB:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
@@ -67,7 +75,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p mlc-input
-          curl --fail --location --retry 4 +            --output mlc-input/model-package.tar +            "$MLC_RELEASE_URL"
+          curl --fail --location --retry 4 \
+            --output mlc-input/model-package.tar \
+            "$MLC_RELEASE_URL"
           echo "$MLC_RELEASE_SHA256  mlc-input/model-package.tar" | sha256sum --check -
           tar -xf mlc-input/model-package.tar -C mlc-input
           test -s mlc-input/model/mlc-chat-config.json
@@ -123,7 +133,10 @@ jobs:
           )
           PY
 
-          python -m mlc_llm package +            --package-config mlc-package-config.json +            --mlc-llm-source-dir "$GITHUB_WORKSPACE/mlc-llm" +            --output "$GITHUB_WORKSPACE/dist"
+          python -m mlc_llm package \
+            --package-config mlc-package-config.json \
+            --mlc-llm-source-dir "$GITHUB_WORKSPACE/mlc-llm" \
+            --output "$GITHUB_WORKSPACE/dist"
 
           test -s dist/lib/mlc4j/output/arm64-v8a/libtvm4j_runtime_packed.so
           test -s dist/lib/mlc4j/output/tvm4j_core.jar
@@ -167,7 +180,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/app-release.apk +            out/NeonTides-alfa8.10.5-dual-engine-test.apk
+          cp app/build/outputs/apk/release/app-release.apk \
+            out/NeonTides-alfa8.10.5-dual-engine-test.apk
 
       - uses: actions/upload-artifact@v4
         with:
