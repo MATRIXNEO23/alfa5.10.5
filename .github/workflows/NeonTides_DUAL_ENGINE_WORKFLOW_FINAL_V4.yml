@@ -1,0 +1,274 @@
+name: Build Neon Tides dual-engine APK FINAL V4
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      MLC_SOURCE_COMMIT: 9fa644f54b04983adea4d0168f49fc6af4a893ba
+      MLC_RELEASE_URL: https://github.com/MATRIXNEO23/alfa8.10.3/releases/download/mlc-qwen2.5-3b-uncensored-test/NeonTides_Qwen2.5-3B-Uncensored_MLC_q4f16_1_Android.tar
+      MLC_RELEASE_SHA256: 43b748e27698859d6439a0d9e32186fbeefdda1857b9ad82a9ac5bfb368f8190
+      MLC_MODEL_ID: Qwen2.5-3B-Instruct-Uncensored-q4f16_1-MLC
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "TVM_NDK_CC=$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
+          test -x "$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned MLC toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --pre --no-deps \
+            -f https://mlc.ai/wheels \
+            "mlc-llm-cpu==0.20.0.dev0" \
+            "mlc-ai-cpu==0.20.0"
+          python -m pip install \
+            "apache-tvm-ffi==0.1.11" \
+            "numpy==1.26.4" \
+            "ml_dtypes==0.5.4" \
+            cloudpickle packaging psutil "pytest==8.3.5" scipy tornado typing_extensions \
+            datasets fastapi openai pandas prompt_toolkit requests safetensors \
+            sentencepiece shortuuid tiktoken tqdm transformers uvicorn huggingface_hub
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            "torch==2.13.0"
+          FFI_LIB="$(python -c 'import site; print(site.getsitepackages()[0] + "/tvm_ffi/lib")')"
+          echo "LD_LIBRARY_PATH=$FFI_LIB:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          LD_LIBRARY_PATH="$FFI_LIB:${LD_LIBRARY_PATH:-}" python - <<'PY'
+          import pytest
+          import torch
+          import tvm
+          import mlc_llm
+          print("MLC Python preflight OK")
+          PY
+
+      - name: Fetch matching MLC source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/mlc-ai/mlc-llm.git mlc-llm
+          git -C mlc-llm checkout "$MLC_SOURCE_COMMIT"
+          git -C mlc-llm submodule update --init --recursive --depth 1
+          test -s mlc-llm/android/mlc4j/prepare_libs.py
+          test -s mlc-llm/3rdparty/tvm/CMakeLists.txt
+          echo "TVM_SOURCE_DIR=$GITHUB_WORKSPACE/mlc-llm/3rdparty/tvm" >> "$GITHUB_ENV"
+          rustup --version
+          cmake --version
+
+          python - <<'PY'
+          import re
+          import subprocess
+
+          output = subprocess.check_output(["cmake", "--version"], text=True)
+          match = re.search(r"cmake version (\d+)\.(\d+)", output)
+          if match is None or tuple(map(int, match.groups())) < (3, 26):
+              raise RuntimeError(f"CMake >= 3.26 richiesto da TVM-FFI; trovato: {output.strip()}")
+          print("CMake MLC preflight OK:", output.splitlines()[0])
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("mlc-llm/3rdparty/tvm/cmake/modules/Logging.cmake")
+          text = path.read_text(encoding="utf-8")
+          targets = [
+              "tvm_objs",
+              "tvm_runtime_objs",
+              "tvm_libinfo_objs",
+              "tvm_compiler",
+              "tvm_runtime",
+          ]
+          for target in targets:
+              old = f"  target_compile_definitions({target} PUBLIC TVM_LOG_CUSTOMIZE=1)"
+              new = (
+                  f"  if(TARGET {target})\n"
+                  f"    target_compile_definitions({target} PUBLIC TVM_LOG_CUSTOMIZE=1)\n"
+                  "  endif()"
+              )
+              if old not in text:
+                  raise RuntimeError(f"Riga logging TVM non trovata: {target}")
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+          print("Patch compatibilità TVM runtime-only applicata")
+          PY
+
+      - name: Download verified converted model package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mlc-input
+          curl --fail --location --retry 4 \
+            --output mlc-input/model-package.tar \
+            "$MLC_RELEASE_URL"
+          echo "$MLC_RELEASE_SHA256  mlc-input/model-package.tar" | sha256sum --check -
+          tar -xf mlc-input/model-package.tar -C mlc-input
+          test -s mlc-input/model/mlc-chat-config.json
+          test -s mlc-input/model/tensor-cache.json
+          test -s mlc-input/model/tokenizer.json
+          test -s mlc-input/android/Qwen2.5-3B-Instruct-Uncensored-q4f16_1-android.tar
+
+      - name: Build MLC Android runtime and binding
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODEL_ARCHIVE="$GITHUB_WORKSPACE/mlc-input/android/Qwen2.5-3B-Instruct-Uncensored-q4f16_1-android.tar"
+          LLVM_TOOLS="$(dirname "$TVM_NDK_CC")"
+          OBJECT_DIR="$GITHUB_WORKSPACE/model-objects"
+          mkdir -p "$OBJECT_DIR" "$GITHUB_WORKSPACE/build/lib"
+          tar -xf "$MODEL_ARCHIVE" -C "$OBJECT_DIR"
+
+          mapfile -d '' MODEL_OBJECTS < <(find "$OBJECT_DIR" -type f -name '*.o' -print0)
+          test "${#MODEL_OBJECTS[@]}" -gt 0
+          "$LLVM_TOOLS/llvm-ar" qcs \
+            "$GITHUB_WORKSPACE/build/lib/libmodel_android.a" \
+            "${MODEL_OBJECTS[@]}"
+          "$LLVM_TOOLS/llvm-ranlib" \
+            "$GITHUB_WORKSPACE/build/lib/libmodel_android.a"
+
+          MODEL_LIB=$(
+            "$LLVM_TOOLS/llvm-nm" -g --defined-only \
+              "$GITHUB_WORKSPACE/build/lib/libmodel_android.a" |
+            awk '/___tvm_ffi__library_bin$/ {
+              symbol=$NF
+              sub(/^_/, "", symbol)
+              sub(/___tvm_ffi__library_bin$/, "", symbol)
+              print symbol
+              exit
+            }'
+          )
+          test -n "$MODEL_LIB"
+          export MODEL_LIB
+          echo "MLC model_lib rilevato: $MODEL_LIB"
+
+          # Costruzione diretta del binding Android. Evita l'incompatibilità
+          # tra la wheel TVM (tvm.support è un modulo) e il sorgente MLC
+          # (tvm.support.ndk è un package), mantenendo la procedura ufficiale
+          # prepare_libs.py per compilare runtime OpenCL e binding Kotlin.
+          python mlc-llm/android/mlc4j/prepare_libs.py \
+            --mlc-llm-source-dir "$GITHUB_WORKSPACE/mlc-llm"
+
+          mkdir -p dist/lib/mlc4j/src/main/assets
+          cp -R mlc-llm/android/mlc4j/src/. dist/lib/mlc4j/src/
+          cp mlc-llm/android/mlc4j/build.gradle dist/lib/mlc4j/build.gradle
+          cp -R build/output dist/lib/mlc4j/output
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          model_lib = os.environ["MODEL_LIB"]
+          config = {
+              "model_list": [{
+                  "model_id": os.environ["MLC_MODEL_ID"],
+                  "model_lib": model_lib,
+                  "model_url": "import://local-mlc-model",
+                  "estimated_vram_bytes": 2400000000
+              }]
+          }
+          path = Path("dist/lib/mlc4j/src/main/assets/mlc-app-config.json")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+          print(path.read_text(encoding="utf-8"))
+          PY
+
+          test -s dist/lib/mlc4j/output/arm64-v8a/libtvm4j_runtime_packed.so
+          test -s dist/lib/mlc4j/output/tvm4j_core.jar
+          test -s dist/lib/mlc4j/src/main/assets/mlc-app-config.json
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          path = Path("dist/lib/mlc4j/build.gradle")
+          text = path.read_text(encoding="utf-8")
+          text = re.sub(
+              r"""(id\s+['"]org\.jetbrains\.kotlin\.plugin\.serialization['"])\s+version\s+['"][^'"]+['"]""",
+              r"\1",
+              text
+          )
+          path.write_text(text, encoding="utf-8")
+          if "plugin.serialization' version" in text:
+              raise RuntimeError("Versione Kotlin serialization non rimossa da mlc4j")
+          PY
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(
+              Path("dist/lib/mlc4j/src/main/assets/mlc-app-config.json")
+              .read_text(encoding="utf-8")
+          )
+          model = config["model_list"][0]
+          assert model["model_id"] == os.environ["MLC_MODEL_ID"]
+          assert model["model_lib"]
+          print(f"MLC Android preflight OK: model_lib={model['model_lib']}")
+          PY
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Test deterministic and dual-engine code
+        run: gradle :app:testReleaseUnitTest --stacktrace
+
+      - name: Build signed dual-engine APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify MLC runtime and stable signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -l app/build/outputs/apk/release/app-release.apk | grep "lib/arm64-v8a/libtvm4j_runtime_packed.so"
+          SIGNATURE_OUTPUT=$("$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk)
+          echo "$SIGNATURE_OUTPUT"
+          CERT_DIGEST=$(echo "$SIGNATURE_OUTPUT" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1)
+          test "$CERT_DIGEST" = "d448aea352dd3eb38ab5c918c979d731f6cf97f2faa04e88b11f61296fb65097"
+
+      - name: Upload APK
+        shell: bash
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk \
+            out/NeonTides-alfa8.10.5-dual-engine-test.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeonTides-alfa8.10.5-dual-engine-test
+          path: out/NeonTides-alfa8.10.5-dual-engine-test.apk
+          retention-days: 14
