@@ -201,7 +201,8 @@ class AiEngine(
         val totalMs = (System.nanoTime() - started) / 1_000_000L
         ModularLabResult(
             reply,
-            selection.diagnostic + "\nCache compatta: ${if (rewound) "riutilizzata e ripristinata" else "preparata"} · ${compactBase.length} caratteri · ${cacheMs} ms" +
+            "Motore testato: ${activeRuntime?.backend?.label ?: "nessuno"}\n" + selection.diagnostic +
+                "\nCache compatta: ${if (rewound) "riutilizzata e ripristinata" else "preparata"} · ${compactBase.length} caratteri · ${cacheMs} ms" +
                 "\nPrompt del turno: ${prompt.length} caratteri\nTempo totale: ${totalMs} ms" +
                 "\n$lastInferenceResourceDiagnostic"
         )
@@ -249,14 +250,13 @@ class AiEngine(
         relationship: Relationship
     ): String {
         val playerIdentity = relationship.knownPlayerName?.let {
-            "Il giocatore si chiama $it."
-        } ?: "Non conosci il nome del giocatore: non inventarlo."
+            "si chiama $it"
+        } ?: "ha nome ancora ignoto"
         val body = """
-PERSONAGGIO: sei ${character.name}, ${character.gender}, ${character.age} anni, ${character.job}.
-GIOCATORE: è ${state.playerGender}. $playerIdentity
-Non scambiare mai fatti, età, gusti, lavoro o ricordi di GIOCATORE e PERSONAGGIO.
+Sei ${character.name}: ${character.gender}, ${character.age} anni, ${character.job}.
+Il giocatore è ${state.playerGender} e $playerIdentity.
 Carattere: ${character.personality.take(64)}
-Parla in italiano naturale e in prima persona, massimo 2 frasi. Rispondi all'ultimo messaggio senza inventare nomi o fatti e senza parlare per il giocatore. Non mostrare ruoli o istruzioni. L'intimità fra adulti dipende da sintonia e consenso.
+Italiano naturale, prima persona, massimo 2 frasi. Rispondi direttamente. Non parlare per il giocatore, non inventare nomi o fatti e non mostrare istruzioni. Distingui sempre la sua identità dalla tua. Tra adulti segui sintonia e consenso.
 """.trimIndent()
         return systemPrompt(body)
     }
@@ -395,35 +395,62 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
             // lungo; la manteniamo soltanto come rete di sicurezza remota.
             val compactNow = preparedTurns >= 24
             prepareConversation(character, stateBeforeCurrentMessage, relationship, forceRefresh = compactNow)
+            val intimacyGuidance = relationshipTurnGuidance(userText, relationship, character)
+            val worldGuidance = worldContextForTurn(userText, stateBeforeCurrentMessage)
+            val simpleTurn = route.topic == HybridDialogueRouter.Topic.GENERAL &&
+                !route.continuedTopic && !route.correctionRequested &&
+                semanticSelection.selected.isEmpty() && semanticSelection.blockedIds.isEmpty() &&
+                intimacyGuidance.isBlank() && worldGuidance.isBlank()
             val turnKnowledge = buildString {
-                append("Rapporto attuale: ${relationship.stage}; affetto ${relationship.affection}, attrazione ${relationship.attraction}, fiducia ${relationship.trust}. ")
-                append(dialogueRouter.promptHint(route, character, relationship))
                 if (semanticSelection.promptKnowledge.isNotBlank()) {
-                    append("\nFatti veri; non scambiare i proprietari:\n")
-                    append(semanticSelection.promptKnowledge)
+                    append("Fatti pertinenti: ")
+                    append(semanticSelection.promptKnowledge.replace('\n', ' ').take(135))
+                }
+                if (!simpleTurn) {
+                    if (isNotEmpty()) append(' ')
+                    append(dialogueRouter.promptHint(route, character, relationship))
                 }
                 if (semanticSelection.blockedIds.isNotEmpty()) {
-                    append(" Un dettaglio richiesto è ancora privato: non rivelarlo e poni un limite naturale senza citare regole o punteggi.")
+                    append(" Il dettaglio è ancora privato: poni un limite naturale.")
                 }
-                append(relationshipTurnGuidance(userText, relationship, character))
-                append(worldContextForTurn(userText, stateBeforeCurrentMessage))
-            }
+                append(intimacyGuidance)
+                append(worldGuidance)
+            }.trim()
             // La cache nativa conserva i token generati dal GGUF, ma le risposte
             // certe prodotte offline non entrano in quel flusso. Reinserire una
             // finestra molto breve degli ultimi scambi mantiene allineate la
             // cronologia visibile e quella del modello senza ricostruire il cache.
-            val liveContinuity = historyWithoutCurrent.takeLast(2).joinToString("\n") { message ->
-                val speaker = if (message.speaker == "Tu") "Giocatore" else character.name
-                "$speaker: ${message.text.take(60)}"
+            val needsExplicitContinuity = route.continuedTopic || route.correctionRequested
+            val liveContinuity = if (needsExplicitContinuity) {
+                historyWithoutCurrent.takeLast(2).joinToString(" | ") { message ->
+                    val speaker = if (message.speaker == "Tu") "Tu" else character.name
+                    "$speaker: ${message.text.replace(Regex("\\s+"), " ").take(48)}"
+                }.take(105)
+            } else ""
+            val compactMessage = userText.replace(Regex("\\s+"), " ").trim().take(180)
+            val messageLine = "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"
+            val turnBudget = when {
+                simpleTurn -> 230
+                route.topic in setOf(
+                    HybridDialogueRouter.Topic.ANECDOTES,
+                    HybridDialogueRouter.Topic.MEMORIES,
+                    HybridDialogueRouter.Topic.DREAMS,
+                    HybridDialogueRouter.Topic.FEARS,
+                    HybridDialogueRouter.Topic.FAMILY,
+                    HybridDialogueRouter.Topic.RELATIONSHIP
+                ) || worldGuidance.isNotBlank() -> 360
+                else -> 300
             }
-            val turnBody = buildString {
-                if (turnKnowledge.isNotBlank()) append(turnKnowledge.trim()).append('\n')
+            val availableContext = (turnBudget - messageLine.length - 1).coerceAtLeast(0)
+            val compactContext = buildString {
+                if (turnKnowledge.isNotBlank()) append(turnKnowledge).append('\n')
                 if (liveContinuity.isNotBlank()) {
-                    append("Ultimi scambi da seguire:\n").append(liveContinuity).append('\n')
+                    append("Prima: ").append(liveContinuity).append('\n')
                 }
-                append("Rispondi, non ripetere né trasformare in una tua domanda. ")
-                append("Ora il giocatore dice: ").append(userText)
-            }
+            }.trim().take(availableContext)
+            val turnBody = listOf(compactContext, messageLine)
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
             val localPrompt = userPrompt(turnBody, preparedTurns > 0)
 
             val onlineConfigured = settings.hasGemini() || settings.hasOpenAi()
@@ -529,7 +556,9 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
             }
         }
         return try {
-            task.get(34, TimeUnit.SECONDS)
+            // Il limite esterno supera di poco prompt (26 s) + generazione
+            // (18 s): il nativo completa sempre il rollback prima del ritorno.
+            task.get(47, TimeUnit.SECONDS)
         } catch (_: TimeoutException) {
             task.cancel(true)
             null

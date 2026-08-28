@@ -18,6 +18,8 @@ object NativeLlama {
 
     fun libraryLoaded(): Boolean = loaded
 
+    /** Installato esclusivamente nel processo secondario MLC. */
+    external fun installProcessCrashGuard()
     external fun loadModel(path: String, contextSize: Int, threads: Int): Boolean
     external fun isModelLoaded(): Boolean
     external fun prepareConversation(context: String): Boolean

@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #define TAG "NeonTidesLLM"
@@ -24,6 +26,29 @@ static uint32_t gCtx = 2048;
 static int32_t gThreads = 4;
 static bool gBackend = false;
 static std::string gDiagnostics = "NeonTidesLLM diagnostics initialized\n";
+
+// Viene installato soltanto nel processo :mlc_runtime. Una terminazione
+// controllata evita che un abort del driver GPU venga attribuito al processo
+// principale del gioco; il client Binder rileva la morte e applica il rollback.
+static void mlcProcessCrashGuard(int signalNumber) {
+    _exit(128 + signalNumber);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_neontides_nativeapp_ai_NativeLlama_installProcessCrashGuard(
+        JNIEnv *, jobject) {
+    struct sigaction action {};
+    action.sa_handler = mlcProcessCrashGuard;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESETHAND;
+    // Non sostituire SIGSEGV/SIGBUS: ART li usa internamente tramite sigchain.
+    // Gli assert fatali di TVM/OpenCL arrivano invece come SIGABRT.
+    const int guardedSignals[] = {SIGABRT};
+    for (const int guardedSignal : guardedSignals) {
+        sigaction(guardedSignal, &action, nullptr);
+    }
+}
 
 static void diag(const std::string &message) {
     std::lock_guard<std::mutex> lock(gDiagnosticsMutex);
@@ -335,15 +360,28 @@ static jstring generateInternal(
         return jsonMessage(env, "Memoria insufficiente per avviare il modello IA.");
     }
 
+    const int32_t promptStart = cached ? gConversationTokens : 0;
+    const auto rollbackCachedTurn = [&]() {
+        if (!cached || !gConversationCtx) return;
+        llama_memory_t memory = llama_get_memory(gConversationCtx);
+        if (memory && llama_memory_seq_rm(memory, -1, promptStart, -1)) {
+            gConversationTokens = promptStart;
+            gConversationPrepared.store(true);
+            diag("CACHE rollback: tokens=" + std::to_string(gConversationTokens));
+            return;
+        }
+        llama_free(gConversationCtx);
+        gConversationCtx = nullptr;
+        gConversationTokens = 0;
+        gConversationBaseTokens = 0;
+        gConversationPrepared.store(false);
+        diag("CACHE rollback failed: cache cleared");
+    };
+
     llama_batch batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
     if (llama_decode(ctx, batch) != 0) {
-        if (cached) {
-            llama_free(gConversationCtx);
-            gConversationCtx = nullptr;
-            gConversationTokens = 0;
-            gConversationBaseTokens = 0;
-            gConversationPrepared.store(false);
-        } else llama_free(ctx);
+        if (cached) rollbackCachedTurn();
+        else llama_free(ctx);
         diag("DECODE ERROR: initial prompt decode failed");
         return jsonMessage(env, "Il modello non è riuscito a elaborare la conversazione.");
     }
@@ -351,14 +389,9 @@ static jstring generateInternal(
 
     const auto promptMs = elapsedMs(promptStarted);
     diag("PROMPT OK: evaluation_ms=" + std::to_string(promptMs));
-    if (promptMs >= 21000) {
-        if (cached) {
-            llama_free(gConversationCtx);
-            gConversationCtx = nullptr;
-            gConversationTokens = 0;
-            gConversationBaseTokens = 0;
-            gConversationPrepared.store(false);
-        } else llama_free(ctx);
+    if (promptMs >= 26000) {
+        if (cached) rollbackCachedTurn();
+        else llama_free(ctx);
         diag("TIMEOUT: prompt evaluation_ms=" + std::to_string(promptMs));
         return jsonMessage(env, "Il modello è troppo lento su questo dispositivo. Prova un GGUF più piccolo.");
     }
@@ -414,13 +447,8 @@ static jstring generateInternal(
     for (int i = 0; i < limit; ++i) {
         if (elapsedMs(generationStarted) >= 18000) {
             llama_sampler_free(sampler);
-            if (cached) {
-                llama_free(gConversationCtx);
-                gConversationCtx = nullptr;
-                gConversationTokens = 0;
-                gConversationBaseTokens = 0;
-                gConversationPrepared.store(false);
-            } else llama_free(ctx);
+            if (cached) rollbackCachedTurn();
+            else llama_free(ctx);
             LOGE("Generation timeout after 18 seconds");
             diag("TIMEOUT: generation_ms=" + std::to_string(elapsedMs(generationStarted)) +
                  " generated_tokens=" + std::to_string(i));
@@ -477,6 +505,7 @@ static jstring generateInternal(
     if (!cached) llama_free(ctx);
 
     if (out.empty()) {
+        if (cached) rollbackCachedTurn();
         diag("GENERATE ERROR: empty output");
         return jsonMessage(env, "Il modello non ha prodotto una risposta.");
     }

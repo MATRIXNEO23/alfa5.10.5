@@ -165,7 +165,11 @@ internal class MlcLlmRuntime(
         val started = System.nanoTime()
         val activeService = connectService()
         val loaded = activeService.loadModel(model.path.absolutePath, runtimeConfig.modelLib)
-        require(loaded) { "Il processo MLC non ha caricato il modello" }
+        require(loaded) {
+            val detail = runCatching { activeService.lastError() }.getOrDefault("")
+            if (detail.isBlank()) "Il processo MLC non ha caricato il modello"
+            else "Il processo MLC non ha caricato il modello: $detail"
+        }
         loadedPath = model.path.absolutePath.takeIf { loaded }
         preparedContext = ""
         LocalRuntimeDiagnostics.markLoaded(backend)

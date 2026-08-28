@@ -39,13 +39,6 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             result = result
         )).takeLast(30)
         _modularLabHistory.value = updated
-        recordAiDiagnostic("""
-LABORATORIO MODULARE · TEST ${updated.size}
-Domanda: ${text.trim()}
-Valori: affetto $affection · attrazione $attraction · fiducia $trust
-Risposta: ${result.reply}
-${result.diagnostic}
-        """.trimIndent())
         return result
     }
 
@@ -98,22 +91,6 @@ ${result.diagnostic}
         val confirmed = record.copy(changeConfirmed = accepted)
         val updated = (_baseDialogueTestHistory.value + confirmed).takeLast(30)
         _baseDialogueTestHistory.value = updated
-        fun signed(value: Int): String = if (value > 0) "+$value" else value.toString()
-        val result = confirmed.result
-        recordAiDiagnostic("""
-LABORATORIO DIALOGO BASE · TEST ${updated.size}
-Personaggio: ${confirmed.characterName}
-Domanda: ${confirmed.question}
-Valori iniziali: affetto ${confirmed.affection} · attrazione ${confirmed.attraction} · fiducia ${confirmed.trust} · fase ${confirmed.stage}
-Risposta: ${result.reply}
-Variazione: affetto ${signed(result.delta.affection)} · attrazione ${signed(result.delta.attraction)} · fiducia ${signed(result.delta.trust)}
-Valutazione utente: ${if (accepted) "CONFERMATA" else "NON CORRETTA"}
-Percorso: ${result.diagnosticPath.ifBlank { result.engine }}
-Tema: ${result.diagnosticTopic}
-Semantica: ${result.diagnosticSemantics.ifBlank { "nessun modulo" }}
-Tempo totale: ${confirmed.elapsedMs} ms
-${confirmed.resourceDiagnostic}
-        """.trimIndent())
     }
 
     fun clearBaseDialogueTestHistory() {
@@ -437,6 +414,22 @@ ${confirmed.resourceDiagnostic}
             _aiStatus.value = if (relationship.conversationSummary.isNotBlank()) {
                 "${aiEngine.activeEngineLabel()} pronto · ricordi disponibili"
             } else "${aiEngine.activeEngineLabel()} pronto · contesto su richiesta"
+            val stateSnapshot = _state.value
+            val relationshipSnapshot = relationship
+            viewModelScope.launch {
+                val prepared = aiEngine.prepareConversation(
+                    character,
+                    stateSnapshot,
+                    relationshipSnapshot
+                )
+                if (_activeCharacter.value?.id == character.id && !_isThinking.value) {
+                    _aiStatus.value = if (prepared) {
+                        "${aiEngine.activeEngineLabel()} pronto · cache del personaggio preparata"
+                    } else {
+                        "${aiEngine.activeEngineLabel()} · preparazione cache non riuscita"
+                    }
+                }
+            }
         } else if (_aiStatus.value != "IA locale pronta") preloadLocalAi()
     }
 
@@ -630,16 +623,30 @@ ${confirmed.resourceDiagnostic}
                 )
 
                 if (result.engine == "Nessuno") {
-                    _aiReady.value = false
-                    _aiStatus.value = "IA bloccata · riavvio del modello…"
-                    _aiReady.value = aiEngine.restart()
+                    val totalRequestMs = android.os.SystemClock.elapsedRealtime() - requestStartedAt
+                    _aiReady.value = aiEngine.isReady()
                     _aiStatus.value = if (_aiReady.value) {
-                        "IA riavviata · il messaggio è rimasto nel campo, premi Invia"
-                    } else "Riavvio fallito · controlla Diagnostica IA"
+                        "Richiesta scaduta · cache conservata · puoi riprovare"
+                    } else {
+                        "Motore non pronto · controlla Diagnostica IA"
+                    }
+                    recordAiDiagnostic("""
+ULTIMA RISPOSTA
+Personaggio: ${character.name}
+Domanda: ${text.trim()}
+Risposta: nessuna — timeout o errore del motore
+Percorso: ${result.diagnosticPath.ifBlank { "timeout o errore locale" }}
+Tema riconosciuto: ${result.diagnosticTopic}
+Semantica: ${result.diagnosticSemantics.ifBlank { "nessun modulo" }}
+Cache: ${aiEngine.preparationDiagnostics()}
+Primo testo percepito: ${_firstTokenMs.value?.let { "$it ms" } ?: "nessun testo valido"}
+Tempo totale percepito: $totalRequestMs ms
+${aiEngine.inferenceResourceDiagnostics()}
+                    """.trimIndent())
                     return@launch
                 }
-                if (result.engine == "Nessuno" || result.reply.isBlank()) {
-                    _aiStatus.value = "Richiesta non inviata · premi Invia per riprovare"
+                if (result.reply.isBlank()) {
+                    _aiStatus.value = "Risposta vuota · cache conservata · puoi riprovare"
                     return@launch
                 }
 
@@ -695,6 +702,7 @@ ${confirmed.resourceDiagnostic}
 ULTIMA RISPOSTA
 Personaggio: ${character.name}
 Domanda: ${text.trim()}
+Risposta: ${result.reply}
 Percorso: ${result.diagnosticPath.ifBlank { result.engine }}
 Tema riconosciuto: ${result.diagnosticTopic}
 Semantica: ${result.diagnosticSemantics.ifBlank { "nessun modulo" }}
@@ -720,6 +728,8 @@ ${aiEngine.inferenceResourceDiagnostics()}
                 recordAiDiagnostic("""
 ULTIMA RISPOSTA
 Personaggio: ${character.name}
+Domanda: ${text.trim()}
+Risposta: nessuna — errore applicazione
 Percorso: errore applicazione
 Tempo trascorso: ${android.os.SystemClock.elapsedRealtime() - requestStartedAt} ms
 Errore: ${t.javaClass.simpleName} · ${t.message ?: "nessun dettaglio"}

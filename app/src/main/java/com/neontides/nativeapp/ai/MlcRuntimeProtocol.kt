@@ -12,6 +12,7 @@ internal object MlcRuntimeProtocol {
     const val IS_LOADED = IBinder.FIRST_CALL_TRANSACTION + 1
     const val GENERATE = IBinder.FIRST_CALL_TRANSACTION + 2
     const val UNLOAD = IBinder.FIRST_CALL_TRANSACTION + 3
+    const val LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 4
 }
 
 internal class MlcRuntimeClient(private val binder: IBinder) : IInterface {
@@ -49,6 +50,12 @@ internal class MlcRuntimeClient(private val binder: IBinder) : IInterface {
         reply.readInt() != 0
     }
 
+    fun lastError(): String = transact { data, reply ->
+        binder.transact(MlcRuntimeProtocol.LAST_ERROR, data, reply, 0)
+        reply.readException()
+        reply.readString().orEmpty()
+    }
+
     private inline fun <T> transact(block: (Parcel, Parcel) -> T): T {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -71,6 +78,7 @@ internal abstract class MlcRuntimeBinder : Binder() {
     abstract fun isModelLoaded(modelPath: String): Boolean
     abstract fun generate(context: String, prompt: String, maxTokens: Int, temperature: Float): String
     abstract fun unloadModel(): Boolean
+    abstract fun lastError(): String
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == INTERFACE_TRANSACTION) {
@@ -105,6 +113,10 @@ internal abstract class MlcRuntimeBinder : Binder() {
                     val result = unloadModel()
                     target.writeNoException()
                     target.writeInt(if (result) 1 else 0)
+                }
+                MlcRuntimeProtocol.LAST_ERROR -> {
+                    target.writeNoException()
+                    target.writeString(lastError())
                 }
                 else -> return super.onTransact(code, data, target, flags)
             }

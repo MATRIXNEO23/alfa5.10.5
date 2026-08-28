@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.neontides.nativeapp.data.GameData
 import com.neontides.nativeapp.GameViewModel
-import com.neontides.nativeapp.ai.BaseDialogueTestRecord
 import com.neontides.nativeapp.model.CharacterProfile
 import kotlinx.coroutines.launch
 
@@ -35,21 +34,12 @@ private val testStages = listOf(
     "Attrazione reciproca", "Appuntamenti", "Relazione"
 )
 
-private enum class TestArea(val label: String) {
-    BASE("Dialogo base"),
-    MODULAR("Semantica"),
-    COMPARISON("Confronto"),
-    PROGRESSION("Progressione"),
-    GALLERY("Galleria")
-}
-
 @Composable
 fun TestUpdatesScreen(vm: GameViewModel, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val characters = GameData.characters
     var selectedId by remember { mutableStateOf(characters.first().id) }
-    var selectedArea by remember { mutableStateOf(TestArea.BASE) }
     var simulations by remember { mutableStateOf(emptyMap<String, SimulatedRelationship>()) }
     var simulatedUnlocks by remember { mutableStateOf(emptySet<String>()) }
     var pending by remember { mutableStateOf<String?>(null) }
@@ -61,90 +51,23 @@ fun TestUpdatesScreen(vm: GameViewModel, onBack: () -> Unit) {
     var labAffection by remember { mutableFloatStateOf(0f) }
     var labAttraction by remember { mutableFloatStateOf(0f) }
     var labTrust by remember { mutableFloatStateOf(0f) }
+    var labReply by remember { mutableStateOf("") }
+    var labDiagnostic by remember { mutableStateOf("Nessun test modulare eseguito") }
     var labRunning by remember { mutableStateOf(false) }
-    var showLabSummary by remember { mutableStateOf(false) }
-    var baseText by remember { mutableStateOf("Raccontami cosa pensi di me") }
-    var baseAffection by remember { mutableFloatStateOf(0f) }
-    var baseAttraction by remember { mutableFloatStateOf(0f) }
-    var baseTrust by remember { mutableFloatStateOf(0f) }
-    var baseRunning by remember { mutableStateOf(false) }
-    var pendingBaseRecord by remember { mutableStateOf<BaseDialogueTestRecord?>(null) }
-    var showBaseSummary by remember { mutableStateOf(false) }
-    var showComparisonSummary by remember { mutableStateOf(false) }
     val labHistory by vm.modularLabHistory.collectAsState()
-    val baseHistory by vm.baseDialogueTestHistory.collectAsState()
-    val lastBaseRecord = baseHistory.lastOrNull()
-    val lastLabRecord = labHistory.lastOrNull()
-    val labSummary = remember(labHistory) {
+    val labReport = remember(labHistory) {
         if (labHistory.isEmpty()) {
-            "Nessun test modulare eseguito"
+            "Nessuno scambio registrato nel laboratorio Luna."
         } else {
             labHistory.mapIndexed { index, record ->
                 """
-TEST ${index + 1}
-Domanda: ${record.question}
-Valori: Affetto ${record.affection} · Attrazione ${record.attraction} · Fiducia ${record.trust}
-Risposta: ${record.result.reply}
-
+SCAMBIO ${index + 1}
+Giocatore: ${record.question}
+Luna: ${record.result.reply}
+Affetto ${record.affection} · Attrazione ${record.attraction} · Fiducia ${record.trust}
 ${record.result.diagnostic}
                 """.trimIndent()
-            }.joinToString("\n\n====================\n\n")
-        }
-    }
-    val baseSummary = remember(baseHistory) {
-        if (baseHistory.isEmpty()) {
-            "Nessun test del dialogo base eseguito"
-        } else {
-            baseHistory.mapIndexed { index, record ->
-                """
-TEST BASE ${index + 1} · ${record.characterName}
-Domanda: ${record.question}
-Valori iniziali: Affetto ${record.affection} · Attrazione ${record.attraction} · Fiducia ${record.trust} · Fase ${record.stage}
-Risposta: ${record.result.reply}
-Variazione proposta: Affetto ${signed(record.result.delta.affection)} · Attrazione ${signed(record.result.delta.attraction)} · Fiducia ${signed(record.result.delta.trust)}
-Valutazione utente: ${if (record.changeConfirmed == true) "CONFERMATA" else "NON CORRETTA"}
-Percorso: ${record.result.diagnosticPath.ifBlank { record.result.engine }}
-Tema: ${record.result.diagnosticTopic}
-Semantica: ${record.result.diagnosticSemantics.ifBlank { "nessun modulo" }}
-Correzione deterministica: ${if (record.result.diagnosticFallback) "SÌ · ${record.result.diagnosticCorrectionReason}" else "NO"}
-Cache: ${record.preparationDiagnostic}
-Tempo totale: ${record.elapsedMs} ms
-${record.resourceDiagnostic}
-                """.trimIndent()
-            }.joinToString("\n\n====================\n\n")
-        }
-    }
-    val comparisons = remember(baseHistory, labHistory) {
-        baseHistory.mapNotNull { base ->
-            labHistory.lastOrNull { modular ->
-                modular.question.trim().equals(base.question.trim(), ignoreCase = true) &&
-                    modular.affection == base.affection &&
-                    modular.attraction == base.attraction &&
-                    modular.trust == base.trust
-            }?.let { modular -> base to modular }
-        }
-    }
-    val comparisonSummary = remember(comparisons) {
-        if (comparisons.isEmpty()) {
-            "Nessun confronto disponibile. Ripeti la stessa domanda con gli stessi tre valori in Dialogo base e Semantica."
-        } else {
-            comparisons.mapIndexed { index, (base, modular) ->
-                """
-CONFRONTO ${index + 1}
-Domanda: ${base.question}
-Valori: Affetto ${base.affection} · Attrazione ${base.attraction} · Fiducia ${base.trust}
-
-DIALOGO BASE · ${base.characterName}
-Risposta: ${base.result.reply}
-Variazione: Affetto ${signed(base.result.delta.affection)} · Attrazione ${signed(base.result.delta.attraction)} · Fiducia ${signed(base.result.delta.trust)}
-Valutazione utente: ${if (base.changeConfirmed == true) "CONFERMATA" else "NON CORRETTA"}
-Tempo: ${base.elapsedMs} ms
-
-SEMANTICA MODULARE · LUNA
-Risposta: ${modular.result.reply}
-${modular.result.diagnostic}
-                """.trimIndent()
-            }.joinToString("\n\n====================\n\n")
+            }.joinToString("\n\n----------------\n\n")
         }
     }
 
@@ -168,247 +91,158 @@ ${modular.result.diagnostic}
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                Text("Area test", style = MaterialTheme.typography.headlineLarge)
-                Text("Ogni prova è isolata e non modifica partita, salvataggi o galleria reale. Apri una sola sezione alla volta.")
+                Text("Test Aggiornamenti", style = MaterialTheme.typography.headlineLarge)
+                Text("Ambiente isolato: queste prove non modificano partita, salvataggi o galleria reale.")
             }
             item {
+                Text("Personaggio da simulare", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(TestArea.entries) { area ->
+                    items(characters) { item ->
                         FilterChip(
-                            selected = selectedArea == area,
-                            onClick = { selectedArea = area },
-                            label = { Text(area.label) }
+                            selected = selectedId == item.id,
+                            onClick = { selectedId = item.id },
+                            label = { Text(item.name.substringBefore(' ')) }
                         )
                     }
                 }
             }
-            when (selectedArea) {
-                TestArea.BASE -> {
-                    item { CharacterSelector(characters, selectedId) { selectedId = it } }
-                    item {
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("Test dialogo del gioco · ${character.name}", style = MaterialTheme.typography.titleLarge)
-                                Text("Usa il normale motore del gioco. I valori scelti valgono solo per questa domanda e il risultato viene aggiunto alla sessione.")
-                                LabSlider("Affetto", baseAffection) { baseAffection = it }
-                                LabSlider("Attrazione", baseAttraction) { baseAttraction = it }
-                                LabSlider("Fiducia", baseTrust) { baseTrust = it }
-                                Text("Fase simulata: ${testRelationshipStage(baseAffection.toInt(), baseAttraction.toInt(), baseTrust.toInt())}")
-                                OutlinedTextField(
-                                    value = baseText,
-                                    onValueChange = { baseText = it },
-                                    label = { Text("Domanda esatta al personaggio") },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    minLines = 2
-                                )
-                                TestQuestionPresets { baseText = it }
-                                Button(
-                                    onClick = {
-                                        baseRunning = true
-                                        scope.launch {
-                                            try {
-                                                pendingBaseRecord = vm.runBaseDialogueTest(
-                                                    selectedId,
-                                                    baseText,
-                                                    baseAffection.toInt(),
-                                                    baseAttraction.toInt(),
-                                                    baseTrust.toInt()
-                                                )
-                                            } finally {
-                                                baseRunning = false
-                                            }
-                                        }
-                                    },
-                                    enabled = !baseRunning && pendingBaseRecord == null && baseText.isNotBlank(),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { Text(if (baseRunning) "GGUF IN ESECUZIONE…" else "AGGIUNGI TEST BASE ALLA SESSIONE") }
-                                pendingBaseRecord?.let { pendingRecord ->
-                                    HorizontalDivider()
-                                    Text("Risultato in attesa di conferma", style = MaterialTheme.typography.titleMedium)
-                                    Text("Domanda: ${pendingRecord.question}")
-                                    Text(pendingRecord.result.reply)
-                                    Text(
-                                        "Variazione proposta: ❤️${signed(pendingRecord.result.delta.affection)} · 🔥${signed(pendingRecord.result.delta.attraction)} · 🤝${signed(pendingRecord.result.delta.trust)}"
-                                    )
-                                    Text("Conferma se l'aumento, la diminuzione o lo zero sono coerenti con la risposta.", style = MaterialTheme.typography.bodySmall)
-                                    Button(
-                                        onClick = {
-                                            vm.confirmBaseDialogueTest(pendingRecord, true)
-                                            pendingBaseRecord = null
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) { Text("CONFERMA E REGISTRA") }
-                                    OutlinedButton(
-                                        onClick = {
-                                            vm.confirmBaseDialogueTest(pendingRecord, false)
-                                            pendingBaseRecord = null
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) { Text("REGISTRA COME NON CORRETTA") }
-                                }
-                                Text("Test raccolti: ${baseHistory.size} / 30", style = MaterialTheme.typography.titleMedium)
-                                if (lastBaseRecord != null) {
-                                    Text("Ultima risposta · ${lastBaseRecord.characterName}", style = MaterialTheme.typography.titleMedium)
-                                    Text(lastBaseRecord.result.reply)
-                                    Text(
-                                        "Variazione: ❤️${signed(lastBaseRecord.result.delta.affection)} · 🔥${signed(lastBaseRecord.result.delta.attraction)} · 🤝${signed(lastBaseRecord.result.delta.trust)}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                SummaryControls(
-                                    shown = showBaseSummary,
-                                    enabled = baseHistory.isNotEmpty(),
-                                    onToggle = { showBaseSummary = !showBaseSummary },
-                                    onCopy = { clipboard.setText(AnnotatedString(baseSummary)) }
-                                )
-                                if (showBaseSummary && baseHistory.isNotEmpty()) {
-                                    Text("Riepilogo dialogo base", style = MaterialTheme.typography.titleMedium)
-                                    Text(baseSummary, style = MaterialTheme.typography.bodySmall)
-                                }
-                                TextButton(
-                                    onClick = {
-                                        vm.clearBaseDialogueTestHistory()
-                                        pendingBaseRecord = null
-                                        showBaseSummary = false
-                                    },
-                                    enabled = baseHistory.isNotEmpty(),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { Text("AZZERA SESSIONE BASE") }
-                            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Text("Affinità graduale · ${character.name}", style = MaterialTheme.typography.titleLarge)
+                        Text("Giorno ${relation.day} · ${relation.stage} · difficoltà ${character.conquestDifficulty}/5")
+                        Text("❤️ ${relation.affection}   🔥 ${relation.attraction}   🤝 ${relation.trust}")
+                        Text(relation.lastResult, style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { applyInteraction("Ascolto e interesse", 1, 0, 1) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("+ Sintonia") }
+                            OutlinedButton(
+                                onClick = { applyInteraction("Conversazione neutra", 0, 0, 0) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Neutra") }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { applyInteraction("Flirt consensuale", 1, 1, 0) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("+ Flirt") }
+                            OutlinedButton(
+                                onClick = { applyInteraction("Offesa o pressione", -2, -1, -3) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("− Rapporto") }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    simulations = simulations + (selectedId to relation.copy(
+                                        day = relation.day + 1,
+                                        lastResult = "Avanzato al giorno ${relation.day + 1}: ora può maturare un nuovo livello."
+                                    ))
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Giorno +1") }
+                            TextButton(
+                                onClick = { simulations = simulations - selectedId },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Azzera") }
                         }
                     }
                 }
-                TestArea.MODULAR -> item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Laboratorio memoria modulare · Luna", style = MaterialTheme.typography.titleLarge)
-                            Text("Ogni prova viene aggiunta alla sessione. Usa la stessa domanda e gli stessi valori del test base per ottenere un confronto automatico.")
-                            LabSlider("Affetto", labAffection) { labAffection = it }
-                            LabSlider("Attrazione", labAttraction) { labAttraction = it }
-                            LabSlider("Fiducia", labTrust) { labTrust = it }
-                            OutlinedTextField(
-                                value = labText,
-                                onValueChange = { labText = it },
-                                label = { Text("Domanda esatta a Luna") },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 2
-                            )
-                            TestQuestionPresets { labText = it }
-                            Button(
-                                onClick = {
-                                    labRunning = true
-                                    scope.launch {
-                                        try {
-                                            vm.runModularMemoryLab(
-                                                labText,
-                                                labAffection.toInt(),
-                                                labAttraction.toInt(),
-                                                labTrust.toInt()
-                                            )
-                                        } finally {
-                                            labRunning = false
-                                        }
-                                    }
-                                },
-                                enabled = !labRunning && labText.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text(if (labRunning) "GGUF IN ESECUZIONE…" else "AGGIUNGI TEST MODULARE ALLA SESSIONE") }
-                            Text("Test raccolti: ${labHistory.size} / 30", style = MaterialTheme.typography.titleMedium)
-                            if (lastLabRecord != null) {
-                                Text("Ultima risposta di Luna", style = MaterialTheme.typography.titleMedium)
-                                Text(lastLabRecord.result.reply)
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Laboratorio memoria modulare · Luna", style = MaterialTheme.typography.titleLarge)
+                        Text("Esperimento isolato. I moduli selezionano dati; la risposta finale è sempre del GGUF. Non modifica la partita.")
+                        LabSlider("Affetto", labAffection) { labAffection = it }
+                        LabSlider("Attrazione", labAttraction) { labAttraction = it }
+                        LabSlider("Fiducia", labTrust) { labTrust = it }
+                        OutlinedTextField(
+                            value = labText,
+                            onValueChange = { labText = it },
+                            label = { Text("Messaggio libero per Luna") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(listOf(
+                                "Quanti anni hai?",
+                                "Cosa fai quando non lavori?",
+                                "Dimmi qualcosa che non sa nessuno",
+                                "Ti ricordi chi sono e che musica ascolto?",
+                                "Ricordi il nostro primo bacio?"
+                            )) { preset ->
+                                AssistChip(onClick = { labText = preset }, label = { Text(preset) })
                             }
-                            SummaryControls(
-                                shown = showLabSummary,
-                                enabled = labHistory.isNotEmpty(),
-                                onToggle = { showLabSummary = !showLabSummary },
-                                onCopy = { clipboard.setText(AnnotatedString(labSummary)) }
-                            )
-                            if (showLabSummary && labHistory.isNotEmpty()) {
-                                Text("Riepilogo semantica modulare", style = MaterialTheme.typography.titleMedium)
-                                Text(labSummary, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(
+                            onClick = {
+                                labRunning = true
+                                scope.launch {
+                                    val result = vm.runModularMemoryLab(
+                                        labText,
+                                        labAffection.toInt(),
+                                        labAttraction.toInt(),
+                                        labTrust.toInt()
+                                    )
+                                    labReply = result.reply
+                                    labDiagnostic = result.diagnostic
+                                    labRunning = false
+                                }
+                            },
+                            enabled = !labRunning && labText.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(if (labRunning) "GGUF IN ESECUZIONE…" else "GENERA CON MODULI + GGUF") }
+                        if (labReply.isNotBlank()) {
+                            Text("Risposta di Luna", style = MaterialTheme.typography.titleMedium)
+                            Text(labReply)
+                        }
+                        Text("Diagnostica percorso modulare", style = MaterialTheme.typography.titleMedium)
+                        Text(labDiagnostic, style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(labReport)) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("COPIA DIAGNOSTICA LUNA") }
+                        Text("Messaggi scambiati nel laboratorio", style = MaterialTheme.typography.titleMedium)
+                        if (labHistory.isEmpty()) {
+                            Text("Nessuno scambio registrato", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            labHistory.takeLast(10).asReversed().forEach { record ->
+                                Text("Giocatore: ${record.question}", style = MaterialTheme.typography.bodySmall)
+                                Text("Luna: ${record.result.reply}", style = MaterialTheme.typography.bodySmall)
+                                HorizontalDivider()
                             }
                             TextButton(
                                 onClick = {
                                     vm.clearModularLabHistory()
-                                    showLabSummary = false
+                                    labReply = ""
+                                    labDiagnostic = "Nessun test modulare eseguito"
                                 },
-                                enabled = labHistory.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth()
-                            ) { Text("AZZERA SESSIONE MODULARE") }
+                            ) { Text("AZZERA DIAGNOSTICA LUNA") }
                         }
                     }
                 }
-                TestArea.COMPARISON -> item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Confronto base ↔ modulare", style = MaterialTheme.typography.titleLarge)
-                            Text("Gli abbinamenti richiedono la stessa domanda e gli stessi valori di Affetto, Attrazione e Fiducia.")
-                            Text("Confronti disponibili: ${comparisons.size}", style = MaterialTheme.typography.titleMedium)
-                            if (comparisons.isEmpty()) Text(comparisonSummary)
-                            SummaryControls(
-                                shown = showComparisonSummary,
-                                enabled = comparisons.isNotEmpty(),
-                                onToggle = { showComparisonSummary = !showComparisonSummary },
-                                onCopy = { clipboard.setText(AnnotatedString(comparisonSummary)) }
-                            )
-                            if (showComparisonSummary && comparisons.isNotEmpty()) {
-                                Text(comparisonSummary, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
-                TestArea.PROGRESSION -> {
-                    item { CharacterSelector(characters, selectedId) { selectedId = it } }
-                    item {
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                                Text("Progressione relazione · ${character.name}", style = MaterialTheme.typography.titleLarge)
-                                Text("Giorno ${relation.day} · ${relation.stage} · difficoltà ${character.conquestDifficulty}/5")
-                                Text("❤️ ${relation.affection}   🔥 ${relation.attraction}   🤝 ${relation.trust}")
-                                Text(relation.lastResult, style = MaterialTheme.typography.bodySmall)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { applyInteraction("Ascolto e interesse", 1, 0, 1) }, modifier = Modifier.weight(1f)) { Text("+ Sintonia") }
-                                    OutlinedButton(onClick = { applyInteraction("Conversazione neutra", 0, 0, 0) }, modifier = Modifier.weight(1f)) { Text("Neutra") }
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { applyInteraction("Flirt consensuale", 1, 1, 0) }, modifier = Modifier.weight(1f)) { Text("+ Flirt") }
-                                    OutlinedButton(onClick = { applyInteraction("Offesa o pressione", -2, -1, -3) }, modifier = Modifier.weight(1f)) { Text("− Rapporto") }
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            simulations = simulations + (selectedId to relation.copy(
-                                                day = relation.day + 1,
-                                                lastResult = "Avanzato al giorno ${relation.day + 1}: ora può maturare un nuovo livello."
-                                            ))
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    ) { Text("Giorno +1") }
-                                    TextButton(onClick = { simulations = simulations - selectedId }, modifier = Modifier.weight(1f)) { Text("Azzera") }
-                                }
-                            }
-                        }
-                    }
-                }
-                TestArea.GALLERY -> {
-                    item { CharacterSelector(characters, selectedId) { selectedId = it } }
-                    item {
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Galleria · ${character.name}", style = MaterialTheme.typography.titleLarge)
-                                Text("Livelli verificati: $unlocked / 5")
-                                Button(
-                                    onClick = {
-                                        val tier = tiers[unlocked]
-                                        val key = "${character.id}_$tier"
-                                        simulatedUnlocks = simulatedUnlocks + key
-                                        pending = key
-                                    },
-                                    enabled = unlocked < tiers.size,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { Text(if (unlocked < tiers.size) "SIMULA IMMAGINE ${unlocked + 1}" else "TUTTE LE IMMAGINI VERIFICATE") }
-                            }
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Galleria · ${character.name}", style = MaterialTheme.typography.titleLarge)
+                        Text("Livelli verificati: $unlocked / 5")
+                        Button(
+                            onClick = {
+                                val tier = tiers[unlocked]
+                                val key = "${character.id}_$tier"
+                                simulatedUnlocks = simulatedUnlocks + key
+                                pending = key
+                            },
+                            enabled = unlocked < tiers.size,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (unlocked < tiers.size) "SIMULA IMMAGINE ${unlocked + 1}" else "TUTTE LE IMMAGINI VERIFICATE")
                         }
                     }
                 }
@@ -429,59 +263,6 @@ ${modular.result.diagnostic}
                 onContinue = { pending = null },
                 onOpenGallery = { pending = null }
             )
-        }
-    }
-}
-
-@Composable
-private fun CharacterSelector(
-    characters: List<CharacterProfile>,
-    selectedId: String,
-    onSelected: (String) -> Unit
-) {
-    Column {
-        Text("Personaggio del test", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(characters) { character ->
-                FilterChip(
-                    selected = selectedId == character.id,
-                    onClick = { onSelected(character.id) },
-                    label = { Text(character.name.substringBefore(' ')) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TestQuestionPresets(onSelected: (String) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(listOf(
-            "Quanti anni hai?",
-            "Cosa fai quando non lavori?",
-            "Dimmi qualcosa che non sa nessuno",
-            "Ti ricordi chi sono e che musica ascolto?",
-            "Ricordi il nostro primo bacio?"
-        )) { preset ->
-            AssistChip(onClick = { onSelected(preset) }, label = { Text(preset) })
-        }
-    }
-}
-
-@Composable
-private fun SummaryControls(
-    shown: Boolean,
-    enabled: Boolean,
-    onToggle: () -> Unit,
-    onCopy: () -> Unit
-) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onToggle, enabled = enabled, modifier = Modifier.weight(1f)) {
-            Text(if (shown) "NASCONDI" else "MOSTRA RIEPILOGO")
-        }
-        OutlinedButton(onClick = onCopy, enabled = enabled, modifier = Modifier.weight(1f)) {
-            Text("COPIA RIEPILOGO")
         }
     }
 }
