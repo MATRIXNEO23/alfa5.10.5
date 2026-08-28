@@ -57,7 +57,7 @@ jobs:
             "apache-tvm-ffi==0.1.11" \
             "numpy==1.26.4" \
             "ml_dtypes==0.5.4" \
-            cloudpickle packaging psutil scipy tornado typing_extensions \
+            cloudpickle packaging psutil pytest scipy tornado typing_extensions \
             requests safetensors sentencepiece shortuuid tiktoken tqdm
           FFI_LIB="$(python -c 'import site; print(site.getsitepackages()[0] + "/tvm_ffi/lib")')"
           echo "LD_LIBRARY_PATH=$FFI_LIB:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
