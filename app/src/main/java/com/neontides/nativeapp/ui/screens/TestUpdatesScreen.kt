@@ -7,15 +7,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.neontides.nativeapp.data.GameData
 import com.neontides.nativeapp.GameViewModel
 import com.neontides.nativeapp.model.CharacterProfile
-import kotlinx.coroutines.launch
 
 private data class SimulatedRelationship(
     val affection: Int = 0,
@@ -36,8 +33,6 @@ private val testStages = listOf(
 
 @Composable
 fun TestUpdatesScreen(vm: GameViewModel, onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
     val characters = GameData.characters
     var selectedId by remember { mutableStateOf(characters.first().id) }
     var simulations by remember { mutableStateOf(emptyMap<String, SimulatedRelationship>()) }
@@ -47,29 +42,6 @@ fun TestUpdatesScreen(vm: GameViewModel, onBack: () -> Unit) {
     val relation = simulations[selectedId] ?: SimulatedRelationship()
     val tiers = listOf("profile", "casual", "flirt", "date", "intimate")
     val unlocked = tiers.count { "${character.id}_$it" in simulatedUnlocks }
-    var labText by remember { mutableStateOf("Dimmi qualcosa che non hai mai raccontato a nessuno") }
-    var labAffection by remember { mutableFloatStateOf(0f) }
-    var labAttraction by remember { mutableFloatStateOf(0f) }
-    var labTrust by remember { mutableFloatStateOf(0f) }
-    var labReply by remember { mutableStateOf("") }
-    var labDiagnostic by remember { mutableStateOf("Nessun test modulare eseguito") }
-    var labRunning by remember { mutableStateOf(false) }
-    val labHistory by vm.modularLabHistory.collectAsState()
-    val labReport = remember(labHistory) {
-        if (labHistory.isEmpty()) {
-            "Nessuno scambio registrato nel laboratorio Luna."
-        } else {
-            labHistory.mapIndexed { index, record ->
-                """
-SCAMBIO ${index + 1}
-Giocatore: ${record.question}
-Luna: ${record.result.reply}
-Affetto ${record.affection} · Attrazione ${record.attraction} · Fiducia ${record.trust}
-${record.result.diagnostic}
-                """.trimIndent()
-            }.joinToString("\n\n----------------\n\n")
-        }
-    }
 
     fun applyInteraction(kind: String, affection: Int, attraction: Int, trust: Int) {
         simulations = simulations + (
@@ -153,79 +125,7 @@ ${record.result.diagnostic}
                 }
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Laboratorio memoria modulare · Luna", style = MaterialTheme.typography.titleLarge)
-                        Text("Esperimento isolato. I moduli selezionano dati; la risposta finale è sempre del GGUF. Non modifica la partita.")
-                        LabSlider("Affetto", labAffection) { labAffection = it }
-                        LabSlider("Attrazione", labAttraction) { labAttraction = it }
-                        LabSlider("Fiducia", labTrust) { labTrust = it }
-                        OutlinedTextField(
-                            value = labText,
-                            onValueChange = { labText = it },
-                            label = { Text("Messaggio libero per Luna") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 2
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(listOf(
-                                "Quanti anni hai?",
-                                "Cosa fai quando non lavori?",
-                                "Dimmi qualcosa che non sa nessuno",
-                                "Ti ricordi chi sono e che musica ascolto?",
-                                "Ricordi il nostro primo bacio?"
-                            )) { preset ->
-                                AssistChip(onClick = { labText = preset }, label = { Text(preset) })
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                labRunning = true
-                                scope.launch {
-                                    val result = vm.runModularMemoryLab(
-                                        labText,
-                                        labAffection.toInt(),
-                                        labAttraction.toInt(),
-                                        labTrust.toInt()
-                                    )
-                                    labReply = result.reply
-                                    labDiagnostic = result.diagnostic
-                                    labRunning = false
-                                }
-                            },
-                            enabled = !labRunning && labText.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text(if (labRunning) "GGUF IN ESECUZIONE…" else "GENERA CON MODULI + GGUF") }
-                        if (labReply.isNotBlank()) {
-                            Text("Risposta di Luna", style = MaterialTheme.typography.titleMedium)
-                            Text(labReply)
-                        }
-                        Text("Diagnostica percorso modulare", style = MaterialTheme.typography.titleMedium)
-                        Text(labDiagnostic, style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(
-                            onClick = { clipboard.setText(AnnotatedString(labReport)) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("COPIA DIAGNOSTICA LUNA") }
-                        Text("Messaggi scambiati nel laboratorio", style = MaterialTheme.typography.titleMedium)
-                        if (labHistory.isEmpty()) {
-                            Text("Nessuno scambio registrato", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            labHistory.takeLast(10).asReversed().forEach { record ->
-                                Text("Giocatore: ${record.question}", style = MaterialTheme.typography.bodySmall)
-                                Text("Luna: ${record.result.reply}", style = MaterialTheme.typography.bodySmall)
-                                HorizontalDivider()
-                            }
-                            TextButton(
-                                onClick = {
-                                    vm.clearModularLabHistory()
-                                    labReply = ""
-                                    labDiagnostic = "Nessun test modulare eseguito"
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("AZZERA DIAGNOSTICA LUNA") }
-                        }
-                    }
-                }
+                LunaDiagnosticLab(vm)
             }
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -264,14 +164,6 @@ ${record.result.diagnostic}
                 onOpenGallery = { pending = null }
             )
         }
-    }
-}
-
-@Composable
-private fun LabSlider(label: String, value: Float, onValueChange: (Float) -> Unit) {
-    Column {
-        Text("$label: ${value.toInt()}")
-        Slider(value = value, onValueChange = onValueChange, valueRange = 0f..100f, steps = 19)
     }
 }
 

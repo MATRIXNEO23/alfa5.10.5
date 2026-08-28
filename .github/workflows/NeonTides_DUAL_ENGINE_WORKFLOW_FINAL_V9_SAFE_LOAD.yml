@@ -1,4 +1,4 @@
-name: Build Neon Tides alfa8.10.6 dual-engine
+name: Build Neon Tides alfa8.10.7 diagnostics dual-engine
 
 on:
   workflow_dispatch:
@@ -367,7 +367,7 @@ jobs:
           print(f"MLC Android preflight OK: model_lib={model['model_lib']}")
           PY
 
-      - name: Prepare alfa8.10.6 version
+      - name: Prepare alfa8.10.7 version
         shell: bash
         run: |
           set -euo pipefail
@@ -380,8 +380,8 @@ jobs:
           old_name = '        versionName = "alfa8.10.5-dual-engine-test"'
           if text.count(old_code) != 1 or text.count(old_name) != 1:
               raise RuntimeError("Versione sorgente inattesa")
-          text = text.replace(old_code, "        versionCode = 43", 1)
-          text = text.replace(old_name, '        versionName = "alfa8.10.6"', 1)
+          text = text.replace(old_code, "        versionCode = 44", 1)
+          text = text.replace(old_name, '        versionName = "alfa8.10.7"', 1)
           path.write_text(text, encoding="utf-8")
           PY
 
@@ -393,7 +393,7 @@ jobs:
       - name: Test deterministic and dual-engine code
         run: gradle :app:testReleaseUnitTest --stacktrace
 
-      - name: Build signed dual-engine alfa8.10.6 APK
+      - name: Build signed dual-engine alfa8.10.7 APK
         run: gradle :app:assembleRelease --stacktrace
 
       - name: Verify MLC runtime and stable signature
@@ -414,10 +414,10 @@ jobs:
         run: |
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk \
-            out/NeonTides-alfa8.10.6.apk
+            out/NeonTides-alfa8.10.7.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NeonTides-alfa8.10.6
-          path: out/NeonTides-alfa8.10.6.apk
+          name: NeonTides-alfa8.10.7
+          path: out/NeonTides-alfa8.10.7.apk
           retention-days: 14

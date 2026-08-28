@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
@@ -217,7 +218,8 @@ class AiEngine(
         character: CharacterProfile,
         state: GameState,
         relationship: Relationship,
-        userText: String
+        userText: String,
+        onPartial: ((String) -> Unit)? = null
     ): AiDialogueResult {
         val labMarker = "__base_dialogue_lab_${character.id}__"
         withContext(Dispatchers.IO) {
@@ -234,7 +236,7 @@ class AiEngine(
             }
         }
         return try {
-            replyAndEvaluate(character, state, relationship, userText)
+            replyAndEvaluate(character, state, relationship, userText, onPartial)
         } finally {
             withContext(Dispatchers.IO) {
                 runCatching { activeRuntime?.rewindConversation() }
@@ -499,6 +501,7 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
                 diagnosticSemantics = semanticSelection.diagnostic,
                 diagnosticFallback = fallbackApplied,
                 diagnosticCorrectionReason = correctionReason,
+                diagnosticRawReply = localRaw ?: onlineResult?.text.orEmpty(),
                 relationshipEvent = finalResult.relationshipEvent
                     ?: relationshipEventFor(userText, finalResult.delta, relationship)
             )
@@ -520,6 +523,7 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
         val task = executor.submit<String?> {
             val wallStarted = android.os.SystemClock.elapsedRealtime()
             val cpuStarted = android.os.Process.getElapsedCpuTime()
+            val resourceSampler = InferenceResourceSampler(modelManager.applicationContext()).also { it.start() }
             try {
                 withInferencePriority {
                     if (!ensureLoadedNow()) null else {
@@ -543,16 +547,12 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
                 val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
                 val oneCorePercent = (cpuMs * 100.0 / wallMs).coerceIn(0.0, cores * 100.0)
                 val totalPercent = (oneCorePercent / cores).coerceIn(0.0, 100.0)
-                val memoryInfo = android.os.Debug.MemoryInfo()
-                android.os.Debug.getMemoryInfo(memoryInfo)
-                val runtime = Runtime.getRuntime()
-                val jvmMb = (runtime.totalMemory() - runtime.freeMemory()) / 1_048_576L
-                val pssMb = memoryInfo.totalPss / 1024
-                lastInferenceResourceDiagnostic =
-                    "Risorse inferenza: CPU ${"%.0f".format(java.util.Locale.US, oneCorePercent)}% di un core " +
-                        "(${"%.1f".format(java.util.Locale.US, totalPercent)}% capacità totale su $cores core) · " +
-                        "RAM PSS $pssMb MB · JVM $jvmMb MB · priorità DISPLAY " +
-                        if (lastInferencePriorityApplied) "applicata durante il calcolo" else "non concessa da Android"
+                lastInferenceResourceDiagnostic = resourceSampler.stopAndReport(
+                    averageOneCorePercent = oneCorePercent,
+                    averageTotalPercent = totalPercent,
+                    cores = cores,
+                    priorityApplied = lastInferencePriorityApplied
+                )
             }
         }
         return try {
@@ -566,6 +566,110 @@ Valori da -3 a 3. emotion: neutral, happy, thoughtful, flirt, upset.
             null
         } finally {
             executor.shutdownNow()
+        }
+    }
+
+    /** Campionamento diagnostico: non influenza prompt, cache o risultato. */
+    private class InferenceResourceSampler(private val context: android.content.Context) {
+        private val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        private val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "neon-diagnostics-sampler").apply { isDaemon = true }
+        }
+        private var sampleCount = 0L
+        private var pssTotalMb = 0L
+        private var pssPeakMb = 0
+        private var nativePeakMb = 0L
+        private var jvmPeakMb = 0L
+        private var availableRamMinMb = Long.MAX_VALUE
+        private var totalRamMb = 0L
+        private var lowMemoryObserved = false
+        private var thermalPeak = 0
+        private var cpuPeakOneCore = 0.0
+        private var processCountPeak = 1
+        private var lastCpuMs = android.os.Process.getElapsedCpuTime()
+        private var lastWallMs = android.os.SystemClock.elapsedRealtime()
+
+        fun start() {
+            sample()
+            // Un campione al secondo limita l'interferenza con l'inferenza che
+            // stiamo misurando, ma intercetta comunque picchi sostenuti.
+            scheduler.scheduleAtFixedRate({ runCatching { sample() } }, 1, 1, TimeUnit.SECONDS)
+        }
+
+        @Synchronized
+        private fun sample() {
+            val nowWall = android.os.SystemClock.elapsedRealtime()
+            val nowCpu = android.os.Process.getElapsedCpuTime()
+            val intervalWall = (nowWall - lastWallMs).coerceAtLeast(1L)
+            val intervalCpu = (nowCpu - lastCpuMs).coerceAtLeast(0L)
+            val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            cpuPeakOneCore = maxOf(cpuPeakOneCore, (intervalCpu * 100.0 / intervalWall).coerceIn(0.0, cores * 100.0))
+            lastWallMs = nowWall
+            lastCpuMs = nowCpu
+
+            val appProcesses = activityManager.runningAppProcesses.orEmpty().filter {
+                it.uid == android.os.Process.myUid() &&
+                    (it.processName == context.packageName || it.processName.startsWith("${context.packageName}:"))
+            }
+            val pids = appProcesses.map { it.pid }.ifEmpty { listOf(android.os.Process.myPid()) }.toIntArray()
+            val pssMb = runCatching {
+                activityManager.getProcessMemoryInfo(pids).sumOf { it.totalPss } / 1024
+            }.getOrDefault(0)
+            processCountPeak = maxOf(processCountPeak, pids.size)
+            val runtime = Runtime.getRuntime()
+            val jvmMb = (runtime.totalMemory() - runtime.freeMemory()) / 1_048_576L
+            val nativeMb = android.os.Debug.getNativeHeapAllocatedSize() / 1_048_576L
+            val system = android.app.ActivityManager.MemoryInfo()
+            activityManager.getMemoryInfo(system)
+
+            sampleCount++
+            pssTotalMb += pssMb.toLong()
+            pssPeakMb = maxOf(pssPeakMb, pssMb)
+            jvmPeakMb = maxOf(jvmPeakMb, jvmMb)
+            nativePeakMb = maxOf(nativePeakMb, nativeMb)
+            availableRamMinMb = minOf(availableRamMinMb, system.availMem / 1_048_576L)
+            totalRamMb = system.totalMem / 1_048_576L
+            lowMemoryObserved = lowMemoryObserved || system.lowMemory
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                thermalPeak = maxOf(thermalPeak, powerManager.currentThermalStatus)
+            }
+        }
+
+        fun stopAndReport(
+            averageOneCorePercent: Double,
+            averageTotalPercent: Double,
+            cores: Int,
+            priorityApplied: Boolean
+        ): String {
+            runCatching { sample() }
+            scheduler.shutdownNow()
+            val samples = sampleCount.coerceAtLeast(1L)
+            val avgPss = pssTotalMb / samples
+            val minAvailable = availableRamMinMb.takeUnless { it == Long.MAX_VALUE } ?: 0L
+            val peakTotalCpu = (cpuPeakOneCore / cores).coerceIn(0.0, 100.0)
+            return buildString {
+                appendLine(
+                    "Risorse inferenza: CPU processo principale media ${"%.0f".format(java.util.Locale.US, averageOneCorePercent)}% di un core " +
+                        "(${"%.1f".format(java.util.Locale.US, averageTotalPercent)}% totale) · " +
+                        "picco ${"%.0f".format(java.util.Locale.US, cpuPeakOneCore)}% di un core " +
+                        "(${"%.1f".format(java.util.Locale.US, peakTotalCpu)}% totale su $cores core)"
+                )
+                appendLine("RAM app totale ($processCountPeak processi) PSS media $avgPss MB · picco $pssPeakMb MB · heap nativo principale picco $nativePeakMb MB · JVM picco $jvmPeakMb MB")
+                appendLine("RAM telefono minima disponibile $minAvailable / $totalRamMb MB · memoria bassa: ${if (lowMemoryObserved) "SÌ" else "NO"}")
+                append("Pressione termica massima: ${thermalLabel(thermalPeak)} · priorità DISPLAY ${if (priorityApplied) "applicata" else "non concessa da Android"}")
+            }
+        }
+
+        private fun thermalLabel(status: Int): String = when (status) {
+            android.os.PowerManager.THERMAL_STATUS_NONE -> "nessuna"
+            android.os.PowerManager.THERMAL_STATUS_LIGHT -> "leggera"
+            android.os.PowerManager.THERMAL_STATUS_MODERATE -> "moderata"
+            android.os.PowerManager.THERMAL_STATUS_SEVERE -> "elevata"
+            android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "critica"
+            android.os.PowerManager.THERMAL_STATUS_EMERGENCY -> "emergenza"
+            android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> "arresto"
+            else -> "non disponibile"
         }
     }
 

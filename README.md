@@ -1,4 +1,31 @@
-# Neon Tides · alfa8.10.5 dual-engine test
+# Neon Tides · alfa8.10.6
+
+La specifica per un futuro modello addestrato appositamente per il gioco è in
+[`README_ADDESTRAMENTO_MODELLO.md`](README_ADDESTRAMENTO_MODELLO.md). Definisce
+responsabilità del modello, schema del dataset, personaggi, memoria, relazioni,
+mondi versionati e test di compatibilità.
+
+## alfa8.10.6 · stabilità, cache e caricamento protetto
+
+- Ripristinato il riuso reale della cache del personaggio: un timeout o una
+  risposta vuota riportano il contesto al prefisso valido senza distruggerlo.
+- Ridotto e reso selettivo il prompt del turno; cronologia e moduli vengono
+  aggiunti soltanto quando servono alla continuità o alla domanda corrente.
+- Allineati i limiti Kotlin e nativi per consentire al runtime di completare il
+  rollback prima di restituire il controllo all'interfaccia.
+- Le importazioni MLC non attivano automaticamente il modello. Il runtime MLC
+  resta nel processo separato `:mlc_runtime`, con watchdog e ripristino del
+  modello precedente se il caricamento non termina correttamente.
+- La diagnostica principale conserva gli ultimi sei scambi e riporta domanda e
+  risposta complete, cache, primo testo, durata, percorso, correzione e risorse.
+- Il laboratorio Luna e la diagnostica principale restano separati; le prove
+  del laboratorio non modificano partita, salvataggi o valori relazionali reali.
+- Verifica sul Motorola Moto G56: cache preparata una volta e poi riutilizzata
+  in 0–1 ms, sette generazioni completate e nessun timeout nel test Qwen 3B.
+- Versione Android `versionCode 43`, `versionName alfa8.10.6`; firma e
+  `applicationId` invariati.
+
+## alfa8.10.5 · dual-engine test
 
 Questa build mantiene tutta la semantica modulare di alfa8.10.4 e integra due
 runtime locali nella stessa app:

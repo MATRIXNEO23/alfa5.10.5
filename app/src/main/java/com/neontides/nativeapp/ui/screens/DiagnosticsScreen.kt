@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Debug
 import android.os.Process
 import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +30,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 
 @Composable
 fun DiagnosticsScreen(
@@ -44,7 +48,20 @@ fun DiagnosticsScreen(
     var report by remember { mutableStateOf("Raccolta diagnostica in corso…") }
     var loading by remember { mutableStateOf(true) }
     var copied by remember { mutableStateOf(false) }
+    var exportText by remember { mutableStateOf("") }
+    var exportStatus by remember { mutableStateOf("") }
     var resources by remember { mutableStateOf(PerformanceSnapshot.empty()) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            val saved = runCatching {
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(exportText) }
+                    ?: error("Impossibile aprire il file scelto")
+            }.isSuccess
+            exportStatus = if (saved) "Diagnostica esportata" else "Esportazione non riuscita"
+        }
+    }
 
     LaunchedEffect(refresh, appSummary) {
         loading = true
@@ -109,7 +126,7 @@ $nativeLog
             .padding(20.dp)
     ) {
         Text("DIAGNOSTICA IA", color = Color(0xFFFF5A9E), style = MaterialTheme.typography.headlineMedium)
-        Text("Dopo il test premi AGGIORNA, poi COPIA RISULTATO e incollalo nella chat.", style = MaterialTheme.typography.bodySmall)
+        Text("Dopo il test premi AGGIORNA, quindi copia il risultato oppure esportalo in TXT.", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
         Button(
             onClick = {
@@ -119,6 +136,19 @@ $nativeLog
             enabled = !loading,
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (copied) "RISULTATO COPIATO" else "COPIA RISULTATO") }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = {
+                exportText = report
+                val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+                exportLauncher.launch("NeonTides-Diagnostica-$stamp.txt")
+            },
+            enabled = !loading,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("ESPORTA DIAGNOSTICA TXT") }
+        if (exportStatus.isNotBlank()) {
+            Text(exportStatus, style = MaterialTheme.typography.labelSmall, color = Color(0xFF65D98B))
+        }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = { refresh++ },

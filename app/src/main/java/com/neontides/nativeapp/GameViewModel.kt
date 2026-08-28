@@ -25,6 +25,10 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     private val _baseDialogueTestHistory = MutableStateFlow<List<BaseDialogueTestRecord>>(emptyList())
     val baseDialogueTestHistory: StateFlow<List<BaseDialogueTestRecord>> =
         _baseDialogueTestHistory.asStateFlow()
+    private val _baseDialogueTestStreaming = MutableStateFlow("")
+    val baseDialogueTestStreaming: StateFlow<String> = _baseDialogueTestStreaming.asStateFlow()
+    private val _baseDialogueTestRunning = MutableStateFlow(false)
+    val baseDialogueTestRunning: StateFlow<Boolean> = _baseDialogueTestRunning.asStateFlow()
 
     private val _modularLabHistory = MutableStateFlow<List<ModularLabRecord>>(emptyList())
     val modularLabHistory: StateFlow<List<ModularLabRecord>> = _modularLabHistory.asStateFlow()
@@ -65,13 +69,42 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             activeConversationTurns = 0,
             activeConversationLimit = 0
         )
+        val isolatedHistory = _baseDialogueTestHistory.value
+            .filter { it.characterId == characterId }
+            .flatMap { record ->
+                listOf(
+                    DialogueMessage("Tu", record.question),
+                    DialogueMessage(character.name, record.result.reply, record.result.emotion)
+                )
+            }
+            .takeLast(12)
         val testState = snapshot.copy(
             relationships = snapshot.relationships + (characterId to testRelationship),
-            chatHistories = snapshot.chatHistories + (characterId to emptyList())
+            chatHistories = snapshot.chatHistories + (characterId to isolatedHistory)
         )
         val started = android.os.SystemClock.elapsedRealtime()
-        val result = aiEngine.runBaseDialogueTest(character, testState, testRelationship, text.trim())
+        var firstTextMs: Long? = null
+        val rawStreaming = StringBuilder()
+        _baseDialogueTestStreaming.value = ""
+        _baseDialogueTestRunning.value = true
+        val result = try {
+            aiEngine.runBaseDialogueTest(character, testState, testRelationship, text.trim()) { fragment ->
+                rawStreaming.append(fragment)
+                val combined = sanitizeStreamingText(
+                    _baseDialogueTestStreaming.value + fragment,
+                    character.name
+                )
+                _baseDialogueTestStreaming.value = combined
+                if (firstTextMs == null && combined.isNotBlank()) {
+                    firstTextMs = android.os.SystemClock.elapsedRealtime() - started
+                }
+            }
+        } finally {
+            _baseDialogueTestRunning.value = false
+        }
+        val activeModel = modelManager.activeModel()
         val record = BaseDialogueTestRecord(
+            timestampEpochMs = System.currentTimeMillis(),
             characterId = character.id,
             characterName = character.name,
             question = text.trim(),
@@ -79,11 +112,17 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             attraction = attraction,
             trust = trust,
             stage = stage,
+            modelName = activeModel?.displayName ?: "nessuno",
+            backendLabel = activeModel?.backend?.label ?: "nessuno",
+            firstTextMs = firstTextMs,
+            rawStreamedReply = rawStreaming.toString(),
+            streamedReply = _baseDialogueTestStreaming.value,
             elapsedMs = android.os.SystemClock.elapsedRealtime() - started,
             preparationDiagnostic = aiEngine.preparationDiagnostics(),
             resourceDiagnostic = aiEngine.inferenceResourceDiagnostics(),
             result = result
         )
+        _baseDialogueTestHistory.value = (_baseDialogueTestHistory.value + record).takeLast(30)
         return record
     }
 
@@ -95,6 +134,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearBaseDialogueTestHistory() {
         _baseDialogueTestHistory.value = emptyList()
+        _baseDialogueTestStreaming.value = ""
     }
 
     private fun relationshipStageForTest(affection: Int, attraction: Int, trust: Int): String = when {
@@ -597,6 +637,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         val requestStartedAt = android.os.SystemClock.elapsedRealtime()
         _aiStatus.value = "${aiEngine.activeEngineLabel()} · analisi e preparazione…"
         _lastDelta.value = null
+        val rawStreaming = StringBuilder()
 
         viewModelScope.launch {
             try {
@@ -606,6 +647,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
                     relationship = currentRelationship,
                     userText = text,
                     onPartial = { fragment ->
+                        rawStreaming.append(fragment)
                         if (_activeCharacter.value?.id == character.id) {
                             val combined = sanitizeStreamingText(
                                 _streamingReply.value + fragment,
@@ -621,6 +663,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 )
+                val streamedSnapshot = _streamingReply.value
 
                 if (result.engine == "Nessuno") {
                     val totalRequestMs = android.os.SystemClock.elapsedRealtime() - requestStartedAt
@@ -632,9 +675,13 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     recordAiDiagnostic("""
 ULTIMA RISPOSTA
+Data e ora: ${diagnosticTimestamp()}
 Personaggio: ${character.name}
 Domanda: ${text.trim()}
 Risposta: nessuna — timeout o errore del motore
+Testo visto in streaming: ${streamedSnapshot.ifBlank { "nessuno" }}
+Stato streaming: ${if (streamedSnapshot.isBlank()) "nessun testo ricevuto" else "interrotto prima della risposta finale"}
+Output grezzo/parziale motore: ${result.diagnosticRawReply.ifBlank { rawStreaming.toString().ifBlank { "non disponibile" } }}
 Percorso: ${result.diagnosticPath.ifBlank { "timeout o errore locale" }}
 Tema riconosciuto: ${result.diagnosticTopic}
 Semantica: ${result.diagnosticSemantics.ifBlank { "nessun modulo" }}
@@ -700,9 +747,17 @@ ${aiEngine.inferenceResourceDiagnostics()}
                 fun signed(value: Int): String = if (value > 0) "+$value" else value.toString()
                 recordAiDiagnostic("""
 ULTIMA RISPOSTA
+Data e ora: ${diagnosticTimestamp()}
 Personaggio: ${character.name}
 Domanda: ${text.trim()}
-Risposta: ${result.reply}
+Testo visto in streaming: ${streamedSnapshot.ifBlank { "nessuno" }}
+Stato streaming: ${when {
+                    streamedSnapshot.isBlank() -> "nessun testo ricevuto"
+                    result.diagnosticFallback -> "completato, poi sostituito dal deterministico"
+                    else -> "completato e conservato"
+                }}
+Output grezzo/parziale motore: ${result.diagnosticRawReply.ifBlank { rawStreaming.toString().ifBlank { "non disponibile" } }}
+Risposta finale mostrata: ${result.reply}
 Percorso: ${result.diagnosticPath.ifBlank { result.engine }}
 Tema riconosciuto: ${result.diagnosticTopic}
 Semantica: ${result.diagnosticSemantics.ifBlank { "nessun modulo" }}
@@ -713,6 +768,7 @@ Tempo totale percepito: $totalRequestMs ms
 Dimensioni: input ${text.length} caratteri · output ${result.reply.length} caratteri
 Correzione deterministica dopo IA locale: ${if (result.diagnosticFallback) "SÌ" else "NO"}
 Motivo correzione: ${result.diagnosticCorrectionReason.ifBlank { "nessuno" }}
+Verifica possibile falso positivo: ${if (result.diagnosticFallback) "DA VALUTARE CONFRONTANDO OUTPUT GREZZO E RISPOSTA FINALE" else "non applicabile"}
 Punteggio turno: ❤️${signed(result.delta.affection)} · 🔥${signed(result.delta.attraction)} · 🤝${signed(result.delta.trust)}
 ${aiEngine.inferenceResourceDiagnostics()}
                 """.trimIndent())
@@ -727,9 +783,11 @@ ${aiEngine.inferenceResourceDiagnostics()}
                 _aiStatus.value = "Errore IA · messaggio non salvato · puoi riprovare"
                 recordAiDiagnostic("""
 ULTIMA RISPOSTA
+Data e ora: ${diagnosticTimestamp()}
 Personaggio: ${character.name}
 Domanda: ${text.trim()}
 Risposta: nessuna — errore applicazione
+Testo visto in streaming: ${_streamingReply.value.ifBlank { "nessuno" }}
 Percorso: errore applicazione
 Tempo trascorso: ${android.os.SystemClock.elapsedRealtime() - requestStartedAt} ms
 Errore: ${t.javaClass.simpleName} · ${t.message ?: "nessun dettaglio"}
@@ -748,6 +806,11 @@ Errore: ${t.javaClass.simpleName} · ${t.message ?: "nessun dettaglio"}
             "TEST ${index + 1}${if (index == 0) " (più recente)" else ""}\n$value"
         }.joinToString("\n\n----------------\n\n")
     }
+
+    private fun diagnosticTimestamp(): String = java.text.SimpleDateFormat(
+        "yyyy-MM-dd HH:mm:ss",
+        java.util.Locale.getDefault()
+    ).format(java.util.Date())
 
     fun clearAiDiagnostics() {
         aiDiagnosticEntries.clear()

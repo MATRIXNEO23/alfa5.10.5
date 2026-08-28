@@ -2,6 +2,48 @@
 
 Questo documento conserva le idee e le specifiche **non ancora necessariamente implementate**. Il `README.md` descrive invece le versioni già costruite. Quando una voce viene completata, va indicata come implementata nella relativa versione e rimossa dalle attività aperte di questo documento.
 
+## Stato corrente
+
+### alfa8.10.7 diagnostica isolata — `in sviluppo`
+
+- Nessuna modifica prevista a prompt, cache, timeout, memoria, deterministico,
+  punteggi o logica della partita rispetto alla 8.10.6.
+- Laboratorio separato di Luna con lo stesso aspetto e lo stesso percorso IA
+  della chat reale: avatar, messaggi, streaming, campo di testo e modello attivo.
+- Affetto, Attrazione e Fiducia regolabili nel laboratorio senza scrivere nella
+  relazione reale, nei salvataggi o nella cronologia principale.
+- Diagnostica Luna separata con domanda, testo grezzo del motore, testo visto in
+  streaming, risposta finale, eventuale correzione e relativo motivo.
+- Campionamento per ogni inferenza di CPU media/picco, RAM media/picco, heap
+  nativo/JVM, RAM disponibile, memoria bassa e pressione termica.
+- Copia ed esportazione in TXT sia per il laboratorio Luna sia per la
+  diagnostica principale.
+- La risposta in streaming sostituita dal deterministico deve rimanere nel log
+  per consentire di riconoscere correzioni inutili o falsi positivi.
+- Il difetto del personaggio che sparisce mentre si scrive resta registrato, ma
+  non viene corretto in questa build diagnostica per non introdurre una seconda
+  variabile durante i test.
+
+## Decisioni tecniche confermate
+
+- Le versioni seguono sempre l'ordine numerico: dopo 8.10.6 viene 8.10.7.
+- Una build di prova non deve cambiare parti non coinvolte dell'architettura o
+  dell'interfaccia principale.
+- I motori reali llama.cpp/GGUF e MLC devono poter essere provati in un ambiente
+  isolato, mantenendo separati dati e diagnostica dalla partita.
+- La trama, le attività, i luoghi, gli inventari e le relazioni sono stato
+  deterministico del gioco; il modello riceve soltanto scena e blocchi di memoria
+  pertinenti e formula il dialogo.
+- Prima di modificare il deterministico in base ai test Thea/Qwen si raccolgono
+  testo grezzo, streaming, risposta finale e motivo esatto della correzione.
+- Il test Thea su 8.10.6 ha mostrato parziali di circa 26–43 token prima del
+  timeout di generazione: non vanno classificati come risposte semanticamente
+  fallite finché la 8.10.7 non permette di leggerli. Solo dopo la misura si
+  valuterà il recupero dell'ultima frase completa senza alterare la cache.
+- La specifica canonica per un futuro fine-tuning è mantenuta in
+  `README_ADDESTRAMENTO_MODELLO.md`. Il modello formula i dialoghi, mentre stato,
+  trama, memoria, attività, punteggi e autorizzazioni restano deterministici.
+
 ## Trama canonica confermata
 
 - L’ambientazione futura è Tokyo contemporanea.

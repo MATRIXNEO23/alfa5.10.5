@@ -52,7 +52,9 @@ data class AiDialogueResult(
     val diagnosticTopic: String = "generale",
     val diagnosticSemantics: String = "",
     val diagnosticFallback: Boolean = false,
-    val diagnosticCorrectionReason: String = ""
+    val diagnosticCorrectionReason: String = "",
+    /** Output completo del motore prima di pulizia o correzione deterministica. */
+    val diagnosticRawReply: String = ""
 )
 
 data class CharacterProfile(
