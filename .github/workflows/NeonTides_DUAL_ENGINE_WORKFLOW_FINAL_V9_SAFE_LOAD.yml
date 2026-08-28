@@ -405,7 +405,9 @@ jobs:
         run: |
           set -euo pipefail
           unzip -l app/build/outputs/apk/release/app-release.apk | grep "lib/arm64-v8a/libtvm4j_runtime_packed.so"
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer" manifest print app/build/outputs/apk/release/app-release.apk | grep "com.neontides.nativeapp:mlc_runtime"
+          APK_MANIFEST=$("$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer" manifest print app/build/outputs/apk/release/app-release.apk)
+          echo "$APK_MANIFEST" | grep "com.neontides.nativeapp.ai.MlcRuntimeService"
+          echo "$APK_MANIFEST" | grep "mlc_runtime"
           SIGNATURE_OUTPUT=$("$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk)
           echo "$SIGNATURE_OUTPUT"
           CERT_DIGEST=$(echo "$SIGNATURE_OUTPUT" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1)
@@ -423,4 +425,3 @@ jobs:
           name: NeonTides-alfa8.10.5-dual-engine-v9-safe-load
           path: out/NeonTides-alfa8.10.5-dual-engine-v9-safe-load.apk
           retention-days: 14
-
