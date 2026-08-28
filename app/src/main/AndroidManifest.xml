@@ -8,6 +8,12 @@
         android:usesCleartextTraffic="false"
         android:largeHeap="true">
 
+        <service
+            android:name=".ai.MlcRuntimeService"
+            android:exported="false"
+            android:process=":mlc_runtime"
+            android:stopWithTask="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

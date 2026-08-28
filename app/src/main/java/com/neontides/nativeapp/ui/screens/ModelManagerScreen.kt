@@ -34,6 +34,7 @@ fun ModelManagerScreen(
     var geminiKey by remember { mutableStateOf(settings.geminiKey) }
     var openAiKey by remember { mutableStateOf(settings.openAiKey) }
     var confirmDownload by remember { mutableStateOf(false) }
+    var confirmRiskyModel by remember { mutableStateOf<LocalModel?>(null) }
     val scope = rememberCoroutineScope()
     val downloader = remember(manager) { manager.recommendedDownloader() }
     val download by downloader.state.collectAsState()
@@ -56,14 +57,31 @@ fun ModelManagerScreen(
                 withContext(Dispatchers.IO) { manager.importModel(uri) }
             }
             models = manager.listLocalModels()
-            active = activeKey(manager.activeModel())
-            status = result.fold(
-                {
+            result.onSuccess { importedFile ->
+                if (importedFile.isDirectory) {
+                    active = activeKey(manager.activeModel())
+                    status = "Pacchetto MLC verificato e installato. Premi Usa questo modello per provarlo nel processo protetto."
+                } else {
+                    manager.setActive(importedFile)
+                    active = activeKey(manager.activeModel())
                     onModelChanged()
-                    "Modello importato · viene caricato solo il motore selezionato…"
-                },
-                { "Importazione fallita: ${it.message}" }
-            )
+                    status = "GGUF importato · caricamento in RAM in corso…"
+                }
+            }.onFailure {
+                active = activeKey(manager.activeModel())
+                status = "Importazione fallita: ${it.message}"
+            }
+        }
+    }
+
+    fun activateModel(model: LocalModel, retry: Boolean = false) {
+        manager.setActive(model)
+        active = activeKey(model)
+        onModelChanged()
+        status = if (retry) {
+            "Nuovo tentativo nel processo MLC protetto. Se il runtime cade, Neon Tides resta aperto."
+        } else {
+            "Cambio motore · il precedente viene scaricato dalla RAM."
         }
     }
 
@@ -152,6 +170,13 @@ fun ModelManagerScreen(
                     Text(model.displayName)
                     Text(model.backend.label, style = MaterialTheme.typography.labelLarge)
                     Text("%.2f GB".format(model.sizeBytes / 1024.0 / 1024.0 / 1024.0))
+                    if (manager.wasLastLoadInterrupted(model)) {
+                        Text(
+                            "⚠ L'ultimo caricamento di questo modello ha interrotto il runtime MLC.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     if (active == activeKey(model)) {
                         Text("✅ Selezionato")
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -171,10 +196,11 @@ fun ModelManagerScreen(
                             ) { Text("Scarica RAM") }
                         }
                     } else TextButton(onClick = {
-                        manager.setActive(model)
-                        active = activeKey(model)
-                        onModelChanged()
-                        status = "Cambio motore · il precedente viene scaricato dalla RAM."
+                        if (manager.wasLastLoadInterrupted(model)) {
+                            confirmRiskyModel = model
+                        } else {
+                            activateModel(model)
+                        }
                     }) { Text("Usa questo modello") }
                     TextButton(onClick = {
                         val removed = manager.deleteModel(model.path)
@@ -232,6 +258,28 @@ fun ModelManagerScreen(
                 }) { Text("Scarica") }
             },
             dismissButton = { TextButton(onClick = { confirmDownload = false }) { Text("Annulla") } }
+        )
+    }
+
+    confirmRiskyModel?.let { model ->
+        AlertDialog(
+            onDismissRequest = { confirmRiskyModel = null },
+            title = { Text("Riprovare il modello MLC?") },
+            text = {
+                Text(
+                    "L'ultimo caricamento di ${model.displayName} ha arrestato il runtime. " +
+                        "Il nuovo tentativo avverra in un processo separato: se fallisce, l'app restera utilizzabile."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmRiskyModel = null
+                    activateModel(model, retry = true)
+                }) { Text("Riprova") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRiskyModel = null }) { Text("Annulla") }
+            }
         )
     }
 }

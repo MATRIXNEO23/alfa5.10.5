@@ -1,12 +1,14 @@
 package com.neontides.nativeapp.ai
 
-import ai.mlc.mlcllm.MLCEngine
-import ai.mlc.mlcllm.OpenAIProtocol
-import ai.mlc.mlcllm.OpenAIProtocol.ChatCompletionMessage
-import ai.mlc.mlcllm.OpenAIProtocol.ChatCompletionRole
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import com.neontides.nativeapp.BuildConfig
-import kotlinx.coroutines.runBlocking
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal interface LocalAiRuntime {
     val backend: LocalAiBackend
@@ -145,7 +147,9 @@ internal class MlcLlmRuntime(
     private val modelManager: ModelManager
 ) : LocalAiRuntime {
     override val backend = LocalAiBackend.MLC_LLM
-    private var engine: MLCEngine? = null
+    private val appContext = modelManager.applicationContext()
+    @Volatile private var remote: MlcRuntimeClient? = null
+    @Volatile private var serviceConnection: ServiceConnection? = null
     private var loadedPath: String? = null
     private var preparedContext: String = ""
 
@@ -157,11 +161,12 @@ internal class MlcLlmRuntime(
         val runtimeConfig = requireNotNull(modelManager.mlcRuntimeConfig()) {
             "Configurazione mlc-app-config.json non disponibile"
         }
+        modelManager.prepareMlcModelForLoad(model)
         val started = System.nanoTime()
-        val activeEngine = engine ?: MLCEngine().also { engine = it }
-        if (loadedPath != null) activeEngine.unload()
-        activeEngine.reload(model.path.absolutePath, runtimeConfig.modelLib)
-        loadedPath = model.path.absolutePath
+        val activeService = connectService()
+        val loaded = activeService.loadModel(model.path.absolutePath, runtimeConfig.modelLib)
+        require(loaded) { "Il processo MLC non ha caricato il modello" }
+        loadedPath = model.path.absolutePath.takeIf { loaded }
         preparedContext = ""
         LocalRuntimeDiagnostics.markLoaded(backend)
         val elapsed = (System.nanoTime() - started) / 1_000_000L
@@ -173,16 +178,21 @@ internal class MlcLlmRuntime(
     }.getOrElse {
         loadedPath = null
         preparedContext = ""
+        disconnectService()
         LocalRuntimeDiagnostics.markUnloaded(backend)
-        LocalRuntimeDiagnostics.record(backend, "ERROR load: ${it.message}")
+        LocalRuntimeDiagnostics.record(
+            backend,
+            "ERROR load protetto: ${it.message ?: it.javaClass.simpleName}"
+        )
         false
     }
 
     override fun isLoaded(model: LocalModel): Boolean =
-        loadedPath == model.path.absolutePath && engine != null
+        loadedPath == model.path.absolutePath &&
+            runCatching { remote?.isModelLoaded(model.path.absolutePath) == true }.getOrDefault(false)
 
     override fun prepareConversation(context: String): Boolean {
-        if (loadedPath == null || engine == null) return false
+        if (loadedPath == null || remote == null) return false
         preparedContext = context
         LocalRuntimeDiagnostics.record(backend, "CACHE OK · caratteri=${context.length}")
         return true
@@ -200,32 +210,23 @@ internal class MlcLlmRuntime(
         maxTokens: Int,
         temperature: Float,
         onPartial: ((String) -> Unit)?
-    ): String = runBlocking {
-        val activeEngine = requireNotNull(engine) { "MLC non caricato" }
+    ): String {
+        val activeService = requireNotNull(remote) { "Servizio MLC non collegato" }
         require(loadedPath != null) { "Modello MLC non caricato" }
-        val messages = buildList {
-            if (preparedContext.isNotBlank()) {
-                add(ChatCompletionMessage(ChatCompletionRole.system, preparedContext))
-            }
-            add(ChatCompletionMessage(ChatCompletionRole.user, prompt))
-        }
         val started = System.nanoTime()
-        val output = StringBuilder()
-        val channel = activeEngine.chat.completions.create(
-            messages = messages,
-            max_tokens = maxTokens,
-            stream = true,
-            stream_options = OpenAIProtocol.StreamOptions(include_usage = true),
-            temperature = temperature,
-            top_p = 0.9f
-        )
-        for (response in channel) {
-            val fragment = response.choices.firstOrNull()?.delta?.content?.asText().orEmpty()
-            if (fragment.isNotEmpty()) {
-                output.append(fragment)
-                onPartial?.invoke(output.toString())
-            }
+        val output = try {
+            activeService.generate(preparedContext, prompt, maxTokens, temperature).trim()
+        } catch (t: Throwable) {
+            loadedPath = null
+            preparedContext = ""
+            disconnectService()
+            LocalRuntimeDiagnostics.markUnloaded(backend)
+            throw IllegalStateException(
+                "Il processo MLC si e arrestato durante la generazione",
+                t
+            )
         }
+        if (output.isNotEmpty()) onPartial?.invoke(output)
         val elapsed = (System.nanoTime() - started) / 1_000_000L
         val charsPerSecond = if (elapsed > 0L) output.length * 1000.0 / elapsed else 0.0
         LocalRuntimeDiagnostics.record(
@@ -233,18 +234,71 @@ internal class MlcLlmRuntime(
             "GENERATE OK · ${elapsed} ms · ${output.length} caratteri · " +
                 "${String.format(Locale.US, "%.1f", charsPerSecond)} char/s"
         )
-        output.toString().trim()
+        return output
     }
 
     override fun unload(): Boolean = runCatching {
-        engine?.unload()
+        remote?.unloadModel()
         loadedPath = null
         preparedContext = ""
+        disconnectService()
         LocalRuntimeDiagnostics.markUnloaded(backend)
         LocalRuntimeDiagnostics.record(backend, "UNLOAD OK")
         true
     }.getOrElse {
         LocalRuntimeDiagnostics.record(backend, "ERROR unload: ${it.message}")
         false
+    }
+
+    @Synchronized
+    private fun connectService(): MlcRuntimeClient {
+        remote?.let { return it }
+        disconnectService()
+        val connected = CountDownLatch(1)
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                remote = binder?.let(::MlcRuntimeClient)
+                connected.countDown()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                remote = null
+                loadedPath = null
+                preparedContext = ""
+            }
+
+            override fun onBindingDied(name: ComponentName?) {
+                remote = null
+                loadedPath = null
+                preparedContext = ""
+                connected.countDown()
+            }
+
+            override fun onNullBinding(name: ComponentName?) {
+                remote = null
+                connected.countDown()
+            }
+        }
+        serviceConnection = connection
+        val bound = appContext.bindService(
+            Intent(appContext, MlcRuntimeService::class.java),
+            connection,
+            Context.BIND_AUTO_CREATE
+        )
+        require(bound) { "Android non ha avviato il processo MLC protetto" }
+        require(connected.await(12, TimeUnit.SECONDS)) {
+            "Timeout durante l'avvio del processo MLC protetto"
+        }
+        return requireNotNull(remote) { "Il processo MLC si e arrestato durante l'avvio" }
+    }
+
+    @Synchronized
+    private fun disconnectService() {
+        val connection = serviceConnection
+        serviceConnection = null
+        remote = null
+        if (connection != null) {
+            runCatching { appContext.unbindService(connection) }
+        }
     }
 }

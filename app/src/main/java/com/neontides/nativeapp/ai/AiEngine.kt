@@ -285,7 +285,38 @@ Parla in italiano naturale e in prima persona, massimo 2 frasi. Rispondi all'ult
                 return@runCatching true
             }
             selectedRuntime.unload()
-            val loaded = selectedRuntime.load(model)
+            if (!modelManager.beginModelLoad(model)) {
+                LocalRuntimeDiagnostics.record(
+                    model.backend,
+                    "ERROR load: impossibile salvare il marker di avvio sicuro"
+                )
+                runtimeReady = false
+                loadedModelName = null
+                return@runCatching false
+            }
+            val loaded = try {
+                selectedRuntime.load(model)
+            } catch (t: Throwable) {
+                LocalRuntimeDiagnostics.record(
+                    model.backend,
+                    "ERROR load non gestito: ${t.message ?: t.javaClass.simpleName}"
+                )
+                false
+            }
+            modelManager.finishModelLoad(model, loaded)
+            if (!loaded) {
+                runtimeReady = false
+                loadedModelName = null
+                val fallback = modelManager.activeModel()
+                if (fallback != null &&
+                    (fallback.id != model.id || fallback.backend != model.backend)
+                ) {
+                    runCatching { selectedRuntime.unload() }
+                    activeRuntime = null
+                    return@runCatching ensureLoadedNow()
+                }
+                return@runCatching false
+            }
             runtimeReady = loaded
             loadedModelName = key.takeIf { loaded }
             loaded

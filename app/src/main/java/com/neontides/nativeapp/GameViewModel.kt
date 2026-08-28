@@ -267,11 +267,15 @@ ${confirmed.resourceDiagnostic}
 
     private fun preloadLocalAi() {
         viewModelScope.launch {
-            _aiStatus.value = "Caricamento IA locale…"
+            val recovery = modelManager.startupRecoveryMessage()
+            _aiStatus.value = recovery ?: "Caricamento IA locale…"
             _aiReady.value = aiEngine.ensureLoaded()
             _aiStatus.value = if (_aiReady.value) {
-                "${aiEngine.activeEngineLabel()} pronta"
-            } else "Nessun motore locale attivo · apri Configurazione IA"
+                buildString {
+                    append("${aiEngine.activeEngineLabel()} pronta")
+                    if (recovery != null) append(" · ").append(recovery)
+                }
+            } else recovery ?: "Nessun motore locale attivo · apri Configurazione IA"
         }
     }
 
