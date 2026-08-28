@@ -1,9 +1,33 @@
-# Neon Tides · alfa8.10.6
+# Neon Tides · alfa8.10.7
 
 La specifica per un futuro modello addestrato appositamente per il gioco è in
 [`README_ADDESTRAMENTO_MODELLO.md`](README_ADDESTRAMENTO_MODELLO.md). Definisce
 responsabilità del modello, schema del dataset, personaggi, memoria, relazioni,
 mondi versionati e test di compatibilità.
+
+## alfa8.10.7 · laboratorio Luna e diagnostica isolata
+
+- Aggiunto un laboratorio separato di Luna con avatar, messaggi, risposta in
+  streaming e uso del modello/backend realmente selezionato nel gioco.
+- Affetto, Attrazione e Fiducia sono regolabili nel laboratorio senza modificare
+  partita, salvataggi, cronologia principale o relazione reale.
+- Diagnostica Luna indipendente con domanda, output grezzo/parziale del motore,
+  testo mostrato in streaming, risposta finale, correzione deterministica e
+  motivo della correzione.
+- Il testo prodotto prima di un timeout viene conservato nel rapporto: i
+  parziali quasi validi di Thea possono così essere valutati senza classificarli
+  automaticamente come risposte errate.
+- Campionamento leggero durante l'inferenza di CPU, PSS complessivo dei processi
+  dell'app, heap nativo/JVM, RAM disponibile, memoria bassa e stato termico.
+- Diagnostica principale e laboratorio Luna possono essere copiati o esportati
+  separatamente in file TXT e conservano i messaggi scambiati.
+- Nessuna modifica a prompt, cache, timeout, memoria, deterministico, punteggi o
+  interfaccia della chat principale rispetto alla 8.10.6: questa è una build di
+  misura, non una modifica del comportamento del gioco.
+- Il difetto del personaggio che sparisce mentre si scrive resta registrato per
+  una correzione successiva isolata.
+- Versione Android `versionCode 44`, `versionName alfa8.10.7`; firma,
+  `applicationId` e runtime dual-engine invariati.
 
 ## alfa8.10.6 · stabilità, cache e caricamento protetto
 

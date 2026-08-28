@@ -4,9 +4,9 @@ Questo documento conserva le idee e le specifiche **non ancora necessariamente i
 
 ## Stato corrente
 
-### alfa8.10.7 diagnostica isolata — `in sviluppo`
+### alfa8.10.7 diagnostica isolata — `implementato`
 
-- Nessuna modifica prevista a prompt, cache, timeout, memoria, deterministico,
+- Nessuna modifica a prompt, cache, timeout, memoria, deterministico,
   punteggi o logica della partita rispetto alla 8.10.6.
 - Laboratorio separato di Luna con lo stesso aspetto e lo stesso percorso IA
   della chat reale: avatar, messaggi, streaming, campo di testo e modello attivo.
@@ -23,6 +23,7 @@ Questo documento conserva le idee e le specifiche **non ancora necessariamente i
 - Il difetto del personaggio che sparisce mentre si scrive resta registrato, ma
   non viene corretto in questa build diagnostica per non introdurre una seconda
   variabile durante i test.
+- Build GitHub, test, firma, runtime MLC e artifact APK verificati con successo.
 
 ## Decisioni tecniche confermate
 
