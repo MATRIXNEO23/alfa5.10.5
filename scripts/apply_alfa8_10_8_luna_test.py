@@ -108,10 +108,8 @@ ai = replace_once(
 
 ai = replace_once(
     ai,
-    '''            val compactMessage = userText.replace(Regex("\\s+"), " ").trim().take(180)
-            val messageLine = "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"''',
-    '''            val compactMessage = userText.replace(Regex("\\s+"), " ").trim().take(180)
-            val messageLine = relationshipGuidanceOverride?.let {
+    '            val messageLine = "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"',
+    '''            val messageLine = relationshipGuidanceOverride?.let {
                 "$it Messaggio: $compactMessage"
             } ?: "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"''',
     "messageLine relazione",
