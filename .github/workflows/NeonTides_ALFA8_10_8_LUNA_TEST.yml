@@ -6,7 +6,7 @@ on:
       - alfa8.10.8-luna-test
     paths:
       - "app/**"
-      - "patches/**"
+      - "scripts/**"
       - "mlc4j-stub/**"
       - "gradle/**"
       - "gradlew"
@@ -29,12 +29,11 @@ jobs:
       - name: Checkout alfa8.10.8 Luna test
         uses: actions/checkout@v4
 
-      - name: Apply isolated alfa8.10.8 Luna patch
+      - name: Apply guarded alfa8.10.8 Luna transform
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check patches/alfa8.10.8-luna-natural-relationship.patch
-          git apply patches/alfa8.10.8-luna-natural-relationship.patch
+          python3 scripts/apply_alfa8_10_8_luna_test.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
