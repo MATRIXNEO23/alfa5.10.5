@@ -10,7 +10,7 @@ Le modifiche devono essere piccole, isolate, misurabili e reversibili. La 8.10.7
 
 ## Modifica 01 · contesto relazione naturale nel solo laboratorio Luna
 
-**Stato:** implementata come patch isolata e versionata nel branch `alfa8.10.8-luna-test`.
+**Stato:** implementata come trasformazione isolata e controllata nel branch `alfa8.10.8-luna-test`.
 
 **Ambito:** esclusivamente `runModularMemoryLab()` / laboratorio Luna. La chat principale resta invariata.
 
@@ -26,7 +26,7 @@ Questo rendeva disponibili al modello le variabili interne e poteva favorire ris
 
 Affetto, Attrazione e Fiducia continuano a essere regolabili e utilizzati dal laboratorio, ma i valori numerici non vengono più presentati al GGUF come testo della conversazione.
 
-La patch `patches/alfa8.10.8-luna-natural-relationship.patch` aggiunge `lunaRelationshipGuidance()`, che converte i tre valori in una breve indicazione comportamentale naturale senza nomi di fase, enum o punteggi tecnici.
+Lo script `scripts/apply_alfa8_10_8_luna_test.py` modifica soltanto gli esatti blocchi previsti della 8.10.7 e aggiunge `lunaRelationshipGuidance()`, che converte i tre valori in una breve indicazione comportamentale naturale senza nomi di fase, enum o punteggi tecnici.
 
 Fasce attuali del test:
 
@@ -80,27 +80,41 @@ Il workflow:
 
 - parte automaticamente sui push del solo branch `alfa8.10.8-luna-test`;
 - mantiene intatti i workflow della 8.10.7 e il branch `main`;
-- prepara JDK 21, Android SDK 35, CMake 3.22.1 e NDK 27.2.12479018;
-- applica e verifica la patch isolata Luna prima della compilazione;
+- applica la trasformazione Luna con controlli stretti prima della compilazione;
 - verifica che la build sia realmente `45 / alfa8.10.8-luna-test`;
 - verifica la presenza del fingerprint Luna v3 e della diagnostica dei valori test;
 - fallisce se trova ancora nel laboratorio la vecchia iniezione testuale dei tre punteggi;
+- prepara JDK 21, Gradle 8.10.2, Android SDK 35, CMake 3.22.1 e NDK 27.2.12479018;
 - compila l'APK debug con runtime GGUF e lo stub MLC già previsto dal progetto quando il runtime MLC completo non viene rigenerato;
 - pubblica come artifact `NeonTides-alfa8.10.8-luna-test.apk`.
 
 Questo workflow serve esclusivamente a validare la modifica Luna e la compilabilità del ramo. Il workflow dual-engine completo V9 rimane disponibile e invariato per una successiva build con runtime MLC completo.
 
-## Modifica 04 · correzione della prima build di verifica
+## Modifica 04 · prima build: preflight ha rilevato sorgente Luna non modificato
 
-**Stato:** corretta.
+**Esito:** fallimento corretto e utile; nessun APK prodotto.
 
-La prima esecuzione del workflow 8.10.8 si è fermata volontariamente al controllo pre-build: il file `AiEngine.kt` del branch era ancora quello puro della 8.10.7, quindi il fingerprint risultava `luna-modular-v2` e la vecchia stringa con i tre punteggi era ancora presente. La compilazione non è stata avviata e nessun APK errato è stato prodotto.
+La prima esecuzione si è fermata al controllo pre-build perché `AiEngine.kt` risultava ancora puro 8.10.7: fingerprint `luna-modular-v2` e vecchia stringa numerica presenti. La causa era uno spostamento precedente del riferimento del branch che aveva escluso il commit sperimentale di `AiEngine.kt`.
 
-La causa era lo spostamento precedente del riferimento del branch, che aveva escluso il commit sperimentale di `AiEngine.kt` pur lasciando le modifiche successive del branch. Per evitare di riscrivere un file grande e introdurre differenze non volute, la modifica Luna è stata trasformata in una patch minima e reversibile:
+Per non riscrivere un file grande e introdurre differenze collaterali, la modifica è stata resa esterna, minima e reversibile.
 
-`patches/alfa8.10.8-luna-natural-relationship.patch`
+## Modifica 05 · tentativo patch unificata sostituito da trasformazione controllata
 
-Il workflow ora esegue `git apply --check` e poi `git apply` prima dei controlli. In questo modo la base 8.10.7 resta byte-per-byte invariata nel file originale del branch fino alla fase di build, mentre la sola differenza Luna è esplicita, revisionabile e facilmente eliminabile. Dopo la validazione sul dispositivo potrà essere incorporata definitivamente nel sorgente, se il test dimostra un miglioramento reale.
+**Esito:** la seconda build si è fermata prima della compilazione durante `git apply`.
+
+Il primo formato scelto per mantenere la modifica isolata era `patches/alfa8.10.8-luna-natural-relationship.patch`. Il formato della patch non è stato accettato dal controllo `git apply`, quindi non è stata applicata alcuna modifica parziale.
+
+La patch è stata superata dal nuovo script `scripts/apply_alfa8_10_8_luna_test.py`. Lo script cerca esattamente e una sola volta i blocchi originali 8.10.7; se il sorgente non corrisponde, termina con errore. Solo dopo questi controlli sostituisce fingerprint, prompt Luna e diagnostica e inserisce la funzione di contesto naturale.
+
+Nella terza esecuzione questa trasformazione ha superato il controllo con successo, così come i successivi controlli su versione, fingerprint, diagnostica e assenza della vecchia iniezione numerica.
+
+## Modifica 06 · repository senza Gradle Wrapper
+
+**Stato:** corretta nel workflow.
+
+La terza esecuzione ha raggiunto per la prima volta il vero passo di compilazione, ma si è fermata immediatamente perché il repository non contiene `gradlew` né la cartella wrapper Gradle. Non è un errore della modifica Luna.
+
+Il workflow usa ora `gradle/actions/setup-gradle@v4` per installare **Gradle 8.10.2** e compila con `gradle :app:assembleDebug --stacktrace`. Il progetto usa Android Gradle Plugin 8.7.3 e Kotlin 2.1.10; nessun file applicativo viene modificato per compensare l'assenza del wrapper.
 
 ## Storico base
 
