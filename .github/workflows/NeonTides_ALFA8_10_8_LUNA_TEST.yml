@@ -1,0 +1,89 @@
+name: Build Neon Tides alfa8.10.8 Luna test
+
+on:
+  push:
+    branches:
+      - alfa8.10.8-luna-test
+    paths:
+      - "app/**"
+      - "mlc4j-stub/**"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/NeonTides_ALFA8_10_8_LUNA_TEST.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-gguf-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout alfa8.10.8 Luna test
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Verify isolated Luna test version
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'versionCode = 45' app/build.gradle.kts
+          grep -F 'versionName = "alfa8.10.8-luna-test"' app/build.gradle.kts
+          grep -F 'luna-modular-v3-natural-relationship' app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
+          if grep -F '"Rapporto: affetto ${request.affection}, attrazione ${request.attraction}, fiducia ${request.trust}.' app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt; then
+            echo "Il vecchio prompt numerico Luna è ancora presente" >&2
+            exit 1
+          fi
+
+      - name: Build debug APK with GGUF runtime and MLC compile stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          mkdir -p out
+          cp "$APK" out/NeonTides-alfa8.10.8-luna-test.apk
+          ls -lh out/NeonTides-alfa8.10.8-luna-test.apk
+
+      - name: Upload alfa8.10.8 Luna test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonTides-alfa8.10.8-luna-test
+          path: out/NeonTides-alfa8.10.8-luna-test.apk
+          if-no-files-found: error
+          retention-days: 14
