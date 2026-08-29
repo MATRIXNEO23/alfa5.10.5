@@ -116,6 +116,32 @@ La terza esecuzione ha raggiunto per la prima volta il vero passo di compilazion
 
 Il workflow usa ora `gradle/actions/setup-gradle@v4` per installare **Gradle 8.10.2** e compila con `gradle :app:assembleDebug --stacktrace`. Il progetto usa Android Gradle Plugin 8.7.3 e Kotlin 2.1.10; nessun file applicativo viene modificato per compensare l'assenza del wrapper.
 
+## Modifica 07 · build alfa8.10.8 Luna test riuscita
+
+**Esito:** SUCCESSO.
+
+Workflow run: `33261210756`.
+
+La quarta esecuzione ha completato con successo tutti i passaggi:
+
+- trasformazione controllata Luna: OK;
+- JDK 21: OK;
+- Gradle 8.10.2: OK;
+- Android SDK / CMake / NDK: OK;
+- controllo versione 45 / `alfa8.10.8-luna-test`: OK;
+- fingerprint `luna-modular-v3-natural-relationship`: OK;
+- diagnostica valori test: OK;
+- assenza della vecchia iniezione numerica nel prompt Luna: OK;
+- compilazione `:app:assembleDebug`: OK;
+- verifica APK: OK;
+- upload artifact: OK.
+
+Artifact prodotto: `NeonTides-alfa8.10.8-luna-test`.
+
+Dimensione artifact ZIP: 46.318.799 byte. Digest artifact: `sha256:0d102f7f6ac4b00a906ae3fe4ddd60f846f7a91abe81512ab6848516756cbbb9`.
+
+Questa build usa il runtime GGUF reale e lo stub di compilazione MLC. Serve per verificare il comportamento Luna con il nuovo contesto relazionale naturale; non sostituisce ancora la build dual-engine completa destinata al confronto MLC/GGUF.
+
 ## Storico base
 
 La 8.10.8 deriva direttamente dalla alfa8.10.7. Laboratorio Luna isolato, diagnostica separata, streaming, misurazione CPU/RAM/termica, runtime dual-engine e comportamento della chat principale restano invariati salvo modifiche esplicitamente registrate sopra.
