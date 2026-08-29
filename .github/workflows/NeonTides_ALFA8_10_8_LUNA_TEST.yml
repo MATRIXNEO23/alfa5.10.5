@@ -59,16 +59,26 @@ jobs:
             "ndk;27.2.12479018"
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      - name: Verify isolated Luna test version
+      - name: Verify current isolated Luna test
         shell: bash
         run: |
           set -euo pipefail
+          AI="app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt"
+          VM="app/src/main/java/com/neontides/nativeapp/GameViewModel.kt"
+          UI="app/src/main/java/com/neontides/nativeapp/ui/screens/LunaDiagnosticLab.kt"
+          OLD="app/src/main/java/com/neontides/nativeapp/ai/ModularMemoryLab.kt"
+
           grep -F 'versionCode = 45' app/build.gradle.kts
           grep -F 'versionName = "alfa8.10.8-luna-test"' app/build.gradle.kts
-          grep -F 'luna-modular-v3-natural-relationship' app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
-          grep -F 'Valori test (solo diagnostica)' app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
-          if grep -F '"Rapporto: affetto ${request.affection}, attrazione ${request.attraction}, fiducia ${request.trust}.' app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt; then
-            echo "Il vecchio prompt numerico Luna è ancora presente" >&2
+          grep -F 'relationshipGuidanceOverride' "$AI"
+          grep -F "Tra voi c'è molta confidenza, fiducia e forte attrazione reciproca." "$AI"
+          grep -F '?: "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"' "$AI"
+          grep -F 'Contesto relazione inviato al GGUF:' "$UI"
+          grep -F 'runBaseDialogueTest(' "$VM"
+          test ! -e "$OLD"
+
+          if grep -R -E 'runModularMemoryLab|modularMemoryLab|ModularLabRequest|ModularLabRecord|ModularLabResult' app/src/main/java; then
+            echo "Il vecchio laboratorio Luna è ancora referenziato" >&2
             exit 1
           fi
 
