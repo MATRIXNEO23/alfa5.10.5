@@ -142,6 +142,12 @@ Dimensione artifact ZIP: 46.318.799 byte. Digest artifact: `sha256:0d102f7f6ac4b
 
 Questa build usa il runtime GGUF reale e lo stub di compilazione MLC. Serve per verificare il comportamento Luna con il nuovo contesto relazionale naturale; non sostituisce ancora la build dual-engine completa destinata al confronto MLC/GGUF.
 
+## Modifica 08 · rimozione workflow secondario ridondante
+
+**Stato:** completata.
+
+Durante la verifica è stato creato temporaneamente un secondo workflow di compile-check. Dopo aver confermato che il workflow ufficiale `NeonTides_ALFA8_10_8_LUNA_TEST.yml` ha completato con successo trasformazione, compilazione, verifica e upload dell'APK, il controllo secondario è stato rimosso per evitare doppie build e risultati ambigui. Nessun file applicativo è stato modificato da questa rimozione.
+
 ## Storico base
 
 La 8.10.8 deriva direttamente dalla alfa8.10.7. Laboratorio Luna isolato, diagnostica separata, streaming, misurazione CPU/RAM/termica, runtime dual-engine e comportamento della chat principale restano invariati salvo modifiche esplicitamente registrate sopra.
