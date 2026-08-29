@@ -1,0 +1,112 @@
+name: Build Neon Tides alfa8.10.8 minimal
+
+on:
+  push:
+    branches:
+      - alfa8.10.8-minimal-stable
+    paths:
+      - "app/**"
+      - "scripts/**"
+      - "mlc4j-stub/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/NeonTides_ALFA8_10_8_MINIMAL.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-gguf-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout alfa8.10.8 minimal
+        uses: actions/checkout@v4
+
+      - name: Apply guarded minimal transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/apply_alfa8_10_8_minimal.py
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Verify minimal delta from 8.10.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          AI="app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt"
+          grep -F 'versionCode = 45' app/build.gradle.kts
+          grep -F 'versionName = "alfa8.10.8-minimal"' app/build.gradle.kts
+          grep -F 'labRelaxEchoFallback: Boolean = false' "$AI"
+          grep -F 'labRelaxEchoFallback = true' "$AI"
+          grep -F 'reason == "eco quasi letterale del messaggio del giocatore"' "$AI"
+          grep -F 'Sei ${character.name}: ${character.gender}, ${character.age} anni, ${character.job}.' "$AI"
+          grep -F 'Italiano naturale, prima persona, massimo 2 frasi.' "$AI"
+          if grep -F 'lunaLabSystemContext' "$AI"; then
+            echo "Prompt sperimentale 8.10.8 non deve essere presente" >&2
+            exit 1
+          fi
+          if grep -F 'Quando tra voi c'\''è sufficiente intimità' "$AI"; then
+            echo "Istruzioni intime aggiuntive non devono essere presenti" >&2
+            exit 1
+          fi
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK with GGUF runtime and MLC compile stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          mkdir -p out
+          cp "$APK" out/NeonTides-alfa8.10.8-minimal.apk
+          ls -lh out/NeonTides-alfa8.10.8-minimal.apk
+
+      - name: Upload alfa8.10.8 minimal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonTides-alfa8.10.8-minimal
+          path: out/NeonTides-alfa8.10.8-minimal.apk
+          if-no-files-found: error
+          retention-days: 14
