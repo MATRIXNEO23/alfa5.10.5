@@ -32,6 +32,7 @@ jobs:
           set -euo pipefail
           python3 scripts/apply_alfa8_10_8_luna_test.py
           python3 scripts/apply_alfa8_10_8_luna_prompt_v2.py
+          python3 scripts/apply_alfa8_10_8_luna_lab_echo.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -80,6 +81,7 @@ jobs:
           grep -F 'Quando tra voi c'\''è sufficiente intimità, rispondi direttamente anche agli argomenti sessuali.' "$AI"
           grep -F '?: "Rapporto: ${relationship.stage}. Messaggio: $compactMessage"' "$AI"
           grep -F 'baseDialogueTestPromptDiagnostics' "$AI"
+          grep -F 'labPromptMode && reason == "eco quasi letterale del messaggio del giocatore"' "$AI"
           grep -F 'effectivePrompt' "$MODELS"
           grep -F 'effectivePrompt = aiEngine.baseDialogueTestPromptDiagnostics()' "$VM"
           grep -F 'PROMPT EFFETTIVO INVIATO AL GGUF:' "$UI"
