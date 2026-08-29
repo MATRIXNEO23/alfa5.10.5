@@ -1,0 +1,53 @@
+diff --git a/app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt b/app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
+--- a/app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
++++ b/app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt
+@@ -177,7 +177,7 @@ class AiEngine(
+         // I punteggi cambiano spesso durante il test e appartengono al turno:
+         // non devono invalidare i token permanenti di Luna.
+-        val fingerprint = "luna-modular-v2"
++        val fingerprint = "luna-modular-v3-natural-relationship"
+         val reuseLabCache = preparedCharacterId == "__modular_lab_luna__" &&
+             modularLabFingerprint == fingerprint && activeRuntime?.isConversationPrepared() == true
+         val rewound = reuseLabCache && activeRuntime?.rewindConversation() == true
+@@ -197,9 +197,14 @@ class AiEngine(
+             "Non sono riuscita a preparare il dialogo.", selection.diagnostic + "\nCache modulare: errore"
+         )
++        val relationshipGuidance = lunaRelationshipGuidance(
++            request.affection,
++            request.attraction,
++            request.trust
++        )
+         val prompt = userPrompt(
+-            "Rapporto: affetto ${request.affection}, attrazione ${request.attraction}, fiducia ${request.trust}. " +
++            relationshipGuidance + " " +
+                 modularMemoryLab.generationInstruction(selection) + "\nGiocatore: ${request.text}",
+             continueConversation = false
+         )
+@@ -213,12 +218,29 @@ class AiEngine(
+         ModularLabResult(
+             reply,
+             "Motore testato: ${activeRuntime?.backend?.label ?: "nessuno"}\n" + selection.diagnostic +
++                "\nValori test (solo diagnostica): affetto ${request.affection}, attrazione ${request.attraction}, fiducia ${request.trust}" +
++                "\nContesto relazione inviato al GGUF: $relationshipGuidance" +
+                 "\nCache compatta: ${if (rewound) "riutilizzata e ripristinata" else "preparata"} · ${compactBase.length} caratteri · ${cacheMs} ms" +
+                 "\nPrompt del turno: ${prompt.length} caratteri\nTempo totale: ${totalMs} ms" +
+                 "\n$lastInferenceResourceDiagnostic"
+         )
+     }
++
++    private fun lunaRelationshipGuidance(affection: Int, attraction: Int, trust: Int): String {
++        val closeness = minOf(affection, trust)
++        return when {
++            closeness >= 75 && attraction >= 75 ->
++                "Tra voi c'è molta confidenza, fiducia e forte attrazione reciproca. Reagisci con naturalezza secondo il tuo carattere."
++            closeness >= 50 && attraction >= 40 ->
++                "Tra voi c'è una confidenza solida e una chiara attrazione reciproca. Reagisci con naturalezza secondo il tuo carattere."
++            closeness >= 25 ->
++                "Vi conoscete abbastanza e sta crescendo la confidenza. Reagisci con naturalezza secondo il tuo carattere."
++            else ->
++                "Vi conoscete ancora poco e non c'è ancora particolare confidenza. Reagisci con naturalezza secondo il tuo carattere."
++        }
++    }
+ 
+     /**
+      * Esegue lo stesso percorso del dialogo reale senza scrivere nello stato di
