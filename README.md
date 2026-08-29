@@ -10,7 +10,7 @@ Le modifiche devono essere piccole, isolate, misurabili e reversibili. La 8.10.7
 
 ## Modifica 01 · contesto relazione naturale nel solo laboratorio Luna
 
-**Stato:** implementata nel branch `alfa8.10.8-luna-test`.
+**Stato:** implementata come patch isolata e versionata nel branch `alfa8.10.8-luna-test`.
 
 **Ambito:** esclusivamente `runModularMemoryLab()` / laboratorio Luna. La chat principale resta invariata.
 
@@ -26,7 +26,7 @@ Questo rendeva disponibili al modello le variabili interne e poteva favorire ris
 
 Affetto, Attrazione e Fiducia continuano a essere regolabili e utilizzati dal laboratorio, ma i valori numerici non vengono più presentati al GGUF come testo della conversazione.
 
-È stata aggiunta `lunaRelationshipGuidance()`, che converte i tre valori in una breve indicazione comportamentale naturale senza nomi di fase, enum o punteggi tecnici.
+La patch `patches/alfa8.10.8-luna-natural-relationship.patch` aggiunge `lunaRelationshipGuidance()`, che converte i tre valori in una breve indicazione comportamentale naturale senza nomi di fase, enum o punteggi tecnici.
 
 Fasce attuali del test:
 
@@ -41,7 +41,7 @@ Ogni frase termina invitando Luna a reagire naturalmente secondo il proprio cara
 
 I valori numerici originali di Affetto, Attrazione e Fiducia restano visibili nella diagnostica del test. Viene inoltre registrata la descrizione naturale realmente inviata al GGUF.
 
-La cache del laboratorio usa ora il fingerprint `luna-modular-v3-natural-relationship` per separare chiaramente questo esperimento dal comportamento precedente.
+La cache del laboratorio usa il fingerprint `luna-modular-v3-natural-relationship` per separare chiaramente questo esperimento dal comportamento precedente.
 
 ### Parti intenzionalmente invariate
 
@@ -81,13 +81,26 @@ Il workflow:
 - parte automaticamente sui push del solo branch `alfa8.10.8-luna-test`;
 - mantiene intatti i workflow della 8.10.7 e il branch `main`;
 - prepara JDK 21, Android SDK 35, CMake 3.22.1 e NDK 27.2.12479018;
-- verifica prima della compilazione che la build sia realmente `45 / alfa8.10.8-luna-test`;
-- verifica la presenza del fingerprint Luna v3;
+- applica e verifica la patch isolata Luna prima della compilazione;
+- verifica che la build sia realmente `45 / alfa8.10.8-luna-test`;
+- verifica la presenza del fingerprint Luna v3 e della diagnostica dei valori test;
 - fallisce se trova ancora nel laboratorio la vecchia iniezione testuale dei tre punteggi;
 - compila l'APK debug con runtime GGUF e lo stub MLC già previsto dal progetto quando il runtime MLC completo non viene rigenerato;
 - pubblica come artifact `NeonTides-alfa8.10.8-luna-test.apk`.
 
 Questo workflow serve esclusivamente a validare la modifica Luna e la compilabilità del ramo. Il workflow dual-engine completo V9 rimane disponibile e invariato per una successiva build con runtime MLC completo.
+
+## Modifica 04 · correzione della prima build di verifica
+
+**Stato:** corretta.
+
+La prima esecuzione del workflow 8.10.8 si è fermata volontariamente al controllo pre-build: il file `AiEngine.kt` del branch era ancora quello puro della 8.10.7, quindi il fingerprint risultava `luna-modular-v2` e la vecchia stringa con i tre punteggi era ancora presente. La compilazione non è stata avviata e nessun APK errato è stato prodotto.
+
+La causa era lo spostamento precedente del riferimento del branch, che aveva escluso il commit sperimentale di `AiEngine.kt` pur lasciando le modifiche successive del branch. Per evitare di riscrivere un file grande e introdurre differenze non volute, la modifica Luna è stata trasformata in una patch minima e reversibile:
+
+`patches/alfa8.10.8-luna-natural-relationship.patch`
+
+Il workflow ora esegue `git apply --check` e poi `git apply` prima dei controlli. In questo modo la base 8.10.7 resta byte-per-byte invariata nel file originale del branch fino alla fase di build, mentre la sola differenza Luna è esplicita, revisionabile e facilmente eliminabile. Dopo la validazione sul dispositivo potrà essere incorporata definitivamente nel sorgente, se il test dimostra un miglioramento reale.
 
 ## Storico base
 
