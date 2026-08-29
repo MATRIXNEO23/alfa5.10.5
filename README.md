@@ -90,7 +90,7 @@ Un secondo workflow di compile-check creato temporaneamente è stato rimosso dop
 
 ## Modifica 09 · correzione del test Luna reale e rimozione del laboratorio obsoleto
 
-**Stato:** implementazione in verifica di compilazione.
+**Stato:** implementata e compilata con successo.
 
 ### Problema scoperto con i test del 29/08/2026
 
@@ -139,7 +139,26 @@ Questa verifica serve a impedire che l'esperimento Luna venga accidentalmente es
 
 ### Build di verifica
 
-La prima esecuzione della Modifica 09 si è fermata nel transform perché il controllo cercava un blocco troppo ampio attorno a `messageLine`; nessun APK è stato compilato con una trasformazione parziale. Il transform è stato quindi ristretto alla sola riga `messageLine`, rendendo la sostituzione più chirurgica. La successiva compilazione deve superare sia il controllo di isolamento sia la compilazione Kotlin/Android prima che il nuovo APK venga considerato valido.
+La prima esecuzione della Modifica 09 si è fermata nel transform perché il controllo cercava un blocco troppo ampio attorno a `messageLine`; nessun APK è stato compilato con una trasformazione parziale. Il transform è stato quindi ristretto alla sola riga `messageLine`, rendendo la sostituzione più chirurgica.
+
+La build successiva ha completato con successo tutti i controlli e la compilazione:
+
+- workflow run: `33265904226`;
+- commit sorgente compilato: `33e1e6cd87f7af233fac3a3a370e59fe3b7a1d5c`;
+- trasformazione del test Luna corrente: OK;
+- assenza del vecchio laboratorio dopo la trasformazione: OK;
+- presenza dell'override naturale: OK;
+- presenza del fallback originale della chat principale: OK;
+- diagnostica `Contesto relazione inviato al GGUF`: OK;
+- compilazione `:app:assembleDebug`: OK;
+- verifica APK: OK;
+- upload artifact: OK.
+
+Artifact: `NeonTides-alfa8.10.8-luna-test`, ID `9718692801`, dimensione ZIP 46.305.796 byte, digest `sha256:c5b711b58ed556044e5490ba221d68b7c7ae75b37bbf991d35bf5446120662c1`.
+
+APK estratto: 53.902.965 byte.
+
+Questa è la prima build 8.10.8 valida per testare realmente il nuovo contesto relazione nella schermata Luna attuale. Non applica ancora la modifica alla chat principale.
 
 ## Storico base
 
