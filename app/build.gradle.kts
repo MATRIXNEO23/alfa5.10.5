@@ -25,8 +25,8 @@ android {
         applicationId = "com.neontides.nativeapp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 41
-        versionName = "alfa8.10.5-dual-engine-test"
+        versionCode = 45
+        versionName = "alfa8.10.8-luna-test"
         buildConfigField("boolean", "MLC_RUNTIME_PACKAGED", mlcRuntimePackaged.toString())
 
         externalNativeBuild {
