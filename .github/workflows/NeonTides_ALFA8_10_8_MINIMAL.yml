@@ -1,4 +1,4 @@
-name: Build Neon Tides alfa8.10.8 minimal
+name: Build Neon Tides alfa8.10.8 engine lab
 
 on:
   push:
@@ -23,10 +23,10 @@ jobs:
     timeout-minutes: 75
 
     steps:
-      - name: Checkout alfa8.10.8 minimal
+      - name: Checkout alfa8.10.8 engine lab
         uses: actions/checkout@v4
 
-      - name: Apply guarded minimal transform
+      - name: Apply guarded engine-lab transform
         shell: bash
         run: |
           set -euo pipefail
@@ -59,26 +59,36 @@ jobs:
             "ndk;27.2.12479018"
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      - name: Verify minimal delta from 8.10.7
+      - name: Verify targeted delta from 8.10.7
         shell: bash
         run: |
           set -euo pipefail
           AI="app/src/main/java/com/neontides/nativeapp/ai/AiEngine.kt"
-          grep -F 'versionCode = 45' app/build.gradle.kts
-          grep -F 'versionName = "alfa8.10.8-minimal"' app/build.gradle.kts
-          grep -F 'labRelaxEchoFallback: Boolean = false' "$AI"
-          grep -F 'labRelaxEchoFallback = true' "$AI"
+          grep -F 'versionCode = 46' app/build.gradle.kts
+          grep -F 'versionName = "alfa8.10.8-engine-lab"' app/build.gradle.kts
+          grep -F 'labEngineAuditFixes: Boolean = false' "$AI"
+          grep -F 'labEngineAuditFixes = true' "$AI"
+          grep -F 'isLabExplicitIntimacy' "$AI"
+          grep -F 'intimita_senza_background_casuale' "$AI"
+          grep -F 'general_bassa_confidenza' "$AI"
+          grep -F 'MODEL_REFUSAL' "$AI"
+          grep -F 'CHARACTER_REFUSAL' "$AI"
+          grep -F 'ROLE_BREAK' "$AI"
           grep -F 'reason == "eco quasi letterale del messaggio del giocatore"' "$AI"
           grep -F 'Sei ${character.name}: ${character.gender}, ${character.age} anni, ${character.job}.' "$AI"
           grep -F 'Italiano naturale, prima persona, massimo 2 frasi.' "$AI"
           if grep -F 'lunaLabSystemContext' "$AI"; then
-            echo "Prompt sperimentale 8.10.8 non deve essere presente" >&2
+            echo "Prompt sperimentale pesante non deve essere presente" >&2
             exit 1
           fi
-          if grep -F 'Quando tra voi c'\''è sufficiente intimità' "$AI"; then
-            echo "Istruzioni intime aggiuntive non devono essere presenti" >&2
+          git diff -- app/src/main/java/com/neontides/nativeapp/ai/HybridDialogueRouter.kt | grep . && {
+            echo "HybridDialogueRouter base non deve essere modificato: fix solo laboratorio" >&2
             exit 1
-          fi
+          } || true
+          git diff -- app/src/main/java/com/neontides/nativeapp/ai/SemanticMemorySelector.kt | grep . && {
+            echo "SemanticMemorySelector base non deve essere modificato: filtro solo laboratorio" >&2
+            exit 1
+          } || true
 
       - name: Run unit tests
         shell: bash
@@ -100,13 +110,13 @@ jobs:
           test -n "$APK"
           test -s "$APK"
           mkdir -p out
-          cp "$APK" out/NeonTides-alfa8.10.8-minimal.apk
-          ls -lh out/NeonTides-alfa8.10.8-minimal.apk
+          cp "$APK" out/NeonTides-alfa8.10.8-engine-lab.apk
+          ls -lh out/NeonTides-alfa8.10.8-engine-lab.apk
 
-      - name: Upload alfa8.10.8 minimal APK
+      - name: Upload alfa8.10.8 engine lab APK
         uses: actions/upload-artifact@v4
         with:
-          name: NeonTides-alfa8.10.8-minimal
-          path: out/NeonTides-alfa8.10.8-minimal.apk
+          name: NeonTides-alfa8.10.8-engine-lab
+          path: out/NeonTides-alfa8.10.8-engine-lab.apk
           if-no-files-found: error
           retention-days: 14
