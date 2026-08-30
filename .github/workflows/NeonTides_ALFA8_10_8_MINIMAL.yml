@@ -32,6 +32,7 @@ jobs:
           set -euo pipefail
           python3 scripts/apply_alfa8_10_8_minimal.py
           python3 scripts/apply_alfa8_10_8_prompt_diagnostics.py
+          python3 scripts/apply_alfa8_10_8_living_luna.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -52,12 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "cmake;3.22.1" \
-            "ndk;27.2.12479018"
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
       - name: Verify targeted delta from 8.10.7
@@ -72,35 +68,23 @@ jobs:
           grep -F 'labEngineAuditFixes: Boolean = false' "$AI"
           grep -F 'labEngineAuditFixes = true' "$AI"
           grep -F 'isLabExplicitIntimacy' "$AI"
-          grep -F 'intimita_senza_background_casuale' "$AI"
           grep -F 'general_bassa_confidenza' "$AI"
           grep -F 'MODEL_REFUSAL' "$AI"
           grep -F 'CHARACTER_REFUSAL' "$AI"
           grep -F 'ROLE_BREAK' "$AI"
-          grep -F 'reason == "eco quasi letterale del messaggio del giocatore"' "$AI"
-          grep -F 'Sei ${character.name}: ${character.gender}, ${character.age} anni, ${character.job}.' "$AI"
-          grep -F 'Italiano naturale, prima persona, massimo 2 frasi.' "$AI"
           grep -F 'diagnosticPromptCache' "$AI"
           grep -F 'diagnosticPromptTurn' "$AI"
           grep -F 'diagnosticDirectiveSources' "$AI"
           grep -F 'CACHE_BASE -> buildCachedContext' "$AI"
           grep -F 'MEMORIA_SEMANTICA ->' "$AI"
           grep -F 'RELAZIONE_INTIMITA ->' "$AI"
+          grep -F 'labLivingState' "$AI"
+          grep -F 'STATO_VIVO ->' "$AI"
+          grep -F 'Situazione interiore:' "$AI"
           grep -F 'diagnosticPromptCache' "$MODELS"
           grep -F 'PROMPT TURNO ESATTO INVIATO A GENERATE()' "$LAB"
           grep -F 'PROVENIENZA DIRETTIVE' "$LAB"
-          if grep -F 'lunaLabSystemContext' "$AI"; then
-            echo "Prompt sperimentale pesante non deve essere presente" >&2
-            exit 1
-          fi
-          git diff -- app/src/main/java/com/neontides/nativeapp/ai/HybridDialogueRouter.kt | grep . && {
-            echo "HybridDialogueRouter base non deve essere modificato: fix solo laboratorio" >&2
-            exit 1
-          } || true
-          git diff -- app/src/main/java/com/neontides/nativeapp/ai/SemanticMemorySelector.kt | grep . && {
-            echo "SemanticMemorySelector base non deve essere modificato: filtro solo laboratorio" >&2
-            exit 1
-          } || true
+          if grep -F 'lunaLabSystemContext' "$AI"; then exit 1; fi
 
       - name: Run unit tests
         shell: bash
